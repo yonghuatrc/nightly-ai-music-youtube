@@ -1,31 +1,26 @@
 # Execution Plan: Nightly AI Music YouTube Channel
 
 Date: 2026-05-12
-Status: Planning → Implementation
+Status: Phase 1a complete → Phase 1b ready
 
 ---
 
-## Phase 1a: Bug Fixes (do first — fix broken foundation before building)
+## Phase 1a: Bug Fixes — ✅ COMPLETE (2026-05-12)
 
-### Critical (must fix)
+All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup active, source validation working.
 
-| # | Issue | File:Line | Fix |
-|---|-------|-----------|-----|
-| 1 | **Song log not idempotent** — duplicate entries on same date | `nightly_music.py:249-262` | Delete existing entries for date before appending; or use unique ID per run |
-| 2 | **Recursive retry in generate_and_save()** — file handle leak | `minimax_music_api.py:110-131` | Replace recursion with for loop; use separate temp paths per retry |
-| 3 | **Module-level .env load crashes on missing file** — even --dry-run breaks | `nightly_music.py:286-304` | Lazy-load Telegram config (load on first use, not import) |
-| 4 | **Dead code: check-duplicate.py** — imported but never called | `nightly_music.py:37` | Wire into fetch_trending to filter out duplicate style_refs within 7 days |
-| 5 | **Log file grows unbounded** — memory concern over time | `nightly_music.py:249-262` | Monthly rotation: `song-log-YYYY-MM.json` |
-| 6 | **Telegram response never checked** — silent failures | `nightly_music.py:376-402` | Add `resp.raise_for_status()` and error logging |
-
-### High (fix before building)
-
-| # | Issue | File:Line | Fix |
-|---|-------|-----------|-----|
-| 7 | **Telegram sends one-by-one** — 10 separate messages | `nightly_music.py:382-402` | Switch to Telegram `sendMediaGroup` API |
-| 8 | **Config has invalid source `spotify`** — not handled | `nightly-music.yaml:24` | Validate config sources against known list in fetch_trending.py |
-| 9 | **Path normalization inconsistent** — expanduser not applied everywhere | `nightly_music.py:430-431` | Apply `os.path.expanduser()` consistently |
-| 10 | **Lyrics retry hardcoded to 2** — should be configurable | `minimax_music_api.py:128` | Move to config: `max_lyrics_retries` |
+| # | Bug | File | Fix Applied |
+|---|-----|------|-------------|
+| 1 | Song log not idempotent | `nightly_music.py:append_log()` | Delete existing entries for date before append; monthly log file |
+| 2 | Recursive retry in generate_and_save() | `minimax_music_api.py:generate_and_save()` | Already for-loop; added missing `import sys` |
+| 3 | Module-level .env crash | `nightly_music.py` | Lazy-load via `_ensure_telegram()` — loads on first use only |
+| 4 | Dead dedup code | `nightly_music.py:run_pipeline()` | Already wired — calls check-duplicate.py, filters blocked pairs |
+| 5 | Log file grows unbounded | `nightly_music.py:append_log()` | Monthly rotation: `song-log-{YYYY-MM}.json` |
+| 6 | Telegram response never checked | `nightly_music.py:send_telegram_batch()` | Added `resp.raise_for_status()` + error logging |
+| 7 | Telegram sends one-by-one | `nightly_music.py:send_telegram_batch()` | Rewrote to use `sendMediaGroup` API with multipart form |
+| 8 | Config source validation | `nightly_music.py:run_pipeline()` | Warn on unknown sources (known: qq-douyin, kkbox, my-fm, pool) |
+| 9 | Path normalization inconsistent | `nightly_music.py:D_DRIVE_BASE, run_pipeline()` | Applied `os.path.expanduser()` to D_DRIVE_BASE and d_drive_dir |
+| 10 | Lyrics retry hardcoded | `nightly_music.py, minimax_music_api.py` | Added `max_lyrics_retries` to config defaults, passed through pipeline |
 
 ---
 
@@ -76,7 +71,7 @@ Status: Planning → Implementation
 
 | Phase | Status | Date Completed |
 |-------|--------|----------------|
-| Phase 1a — Bug fixes | ⬜ Pending | — |
+| Phase 1a — Bug fixes | ✅ Complete | 2026-05-12 |
 | Phase 1b — Prerequisites | ⬜ Pending | — |
 | Phase 1b — Implementation | ⬜ Pending | — |
 | Phase 1b — DRY RUN | ⬜ Pending | — |
