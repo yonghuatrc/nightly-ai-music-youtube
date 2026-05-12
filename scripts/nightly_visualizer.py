@@ -21,6 +21,25 @@ import sys
 import argparse
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Optional: Pollinations.ai fallback for background generation
+# ---------------------------------------------------------------------------
+_api_generate_background = None
+
+try:
+    import image_gen
+    _api_generate_background = image_gen.generate_background
+except ImportError:
+    # Fallback: scripts/ dir might not be on sys.path
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    if _script_dir not in sys.path:
+        sys.path.insert(0, _script_dir)
+    try:
+        import image_gen  # type: ignore
+        _api_generate_background = image_gen.generate_background
+    except ImportError:
+        _api_generate_background = None
+
 
 # ---------------------------------------------------------------------------
 # FFmpeg detection
@@ -64,10 +83,14 @@ def _find_cjk_font():
 
 
 # ---------------------------------------------------------------------------
-# Background image detection
+# Background image detection + Pollinations.ai fallback
 # ---------------------------------------------------------------------------
 def _find_background():
-    """Find a background image from assets. Returns path or None."""
+    """
+    Find a background image from local assets.
+    Falls back to Pollinations.ai generation if none exist.
+    Returns path or None.
+    """
     candidates = [
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "backgrounds"),
         os.path.expanduser("/mnt/d/Hermes/songs/assets/backgrounds/"),
@@ -80,6 +103,35 @@ def _find_background():
                     path = os.path.join(bg_dir, fname)
                     if os.path.isfile(path):
                         return path
+    # Fallback: generate via Pollinations.ai
+    return _generate_background_via_api()
+
+
+def _generate_background_via_api():
+    """Generate a background image via Pollinations.ai when no local one exists."""
+    if _api_generate_background is None:
+        print("[nightly:visualizer] image_gen module not available — cannot generate background",
+              file=sys.stderr)
+        return None
+
+    bg_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "assets", "backgrounds",
+    )
+    os.makedirs(bg_dir, exist_ok=True)
+    out_path = os.path.join(bg_dir, "api-generated-bg.jpg")
+
+    try:
+        print("[nightly:visualizer] No local background — generating via Pollinations.ai...")
+        result = _api_generate_background(out_path=out_path)
+        if result and os.path.isfile(result):
+            size_kb = os.path.getsize(result) / 1024
+            print(f"[nightly:visualizer] Generated background via API: {result} ({size_kb:.1f} KB)")
+            return result
+    except Exception as e:
+        print(f"[nightly:visualizer] Pollinations.ai background generation failed: {e}",
+              file=sys.stderr)
+
     return None
 
 
