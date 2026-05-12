@@ -49,8 +49,10 @@ from minimax_music_api import generate_and_save
 # Optional imports — visualizer and YouTube uploader (graceful fallback)
 try:
     from nightly_visualizer import generate_visualizer as _generate_visualizer
+    from nightly_visualizer import generate_thumbnail as _generate_thumbnail
 except ImportError:
     _generate_visualizer = None
+    _generate_thumbnail = None
 
 try:
     from nightly_uploader import upload_video as _upload_video
@@ -488,7 +490,7 @@ def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None):
 # ---------------------------------------------------------------------------
 # YouTube uploader wrapper (graceful fallback if module missing)
 # ---------------------------------------------------------------------------
-def upload_to_youtube(video_path, title, prompt, date_label):
+def upload_to_youtube(video_path, title, prompt, date_label, lyrics="", thumbnail_path=""):
     """
     Upload video to YouTube with defaults. Gracefully handles missing deps.
     Returns dict with keys: video_id, youtube_url, status, error.
@@ -504,10 +506,21 @@ def upload_to_youtube(video_path, title, prompt, date_label):
         print("[nightly] YouTube upload disabled in config — skipping")
         return {"video_id": "", "youtube_url": "", "status": "disabled", "error": None}
 
+    # Build SEO-optimized description
+    lyrics_lines = [l for l in lyrics.split("\n") if l.strip() and not l.startswith("[")]
+    lyrics_snippet = "\n".join(lyrics_lines[:4]) if lyrics_lines else "🎶"
+
     description = (
-        f"AI-generated music inspired by: {prompt}\n\n"
-        f"Generated on {date_label} using MiniMax music-2.6\n"
-        f"#AIMusic #MiniMax #华语流行"
+        f"🎵 {title} — AI创作的华语流行歌曲。"
+        f"每日更新AI音乐作品，喜欢华语流行音乐的朋友不要错过！\n\n"
+        f"🎤 灵感来源: {prompt}\n"
+        f"📅 发布日期: {date_label}\n\n"
+        f"📝 歌词片段:\n{lyrics_snippet}\n\n"
+        f"💬 这首歌怎么样？评论区告诉我们！\n"
+        f"🔔 订阅频道，每天收听新歌！\n\n"
+        f"---\n"
+        f"此歌曲由 AI 生成 (MiniMax music-2.6)\n"
+        f"#AIMusic #华语流行 #AISong #人工智能音乐 #华语情歌 #MiniMax #AI歌曲 #每日一首AI歌\n"
     )
     tags = yt_cfg.get("tags", ["AI Music", "MiniMax", "华语流行"])
     privacy = yt_cfg.get("privacy", "private")
@@ -522,8 +535,8 @@ def upload_to_youtube(video_path, title, prompt, date_label):
             hour=18, minute=0, second=0, tzinfo=sgt
         )
         publish_at = publish_dt.isoformat()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[nightly] WARNING: publish_at calculation failed: {e}", file=sys.stderr)
 
     try:
         return _upload_video(
@@ -533,7 +546,7 @@ def upload_to_youtube(video_path, title, prompt, date_label):
             tags=tags,
             category_id=category,
             privacy=privacy,
-            thumbnail_path=None,
+            thumbnail_path=thumbnail_path,
             publish_at=publish_at,
         )
     except Exception as e:
@@ -723,6 +736,20 @@ def run_pipeline(date_str, dry_run=False):
                 song["mp4_path"] = viz_result.get("path", "")
                 song["visualizer_status"] = viz_result.get("status", "failed")
                 visualizer_results.append(viz_result)
+
+                # Generate thumbnail
+                thumbnail_path = os.path.join(songs_dir, f"{song['song_number']:02d}-{sanitize_filename(song['title'])}-thumb.jpg")
+                if _generate_thumbnail:
+                    thumb_result = _generate_thumbnail(
+                        song["title"],
+                        thumbnail_path,
+                        bg_image=None,
+                    )
+                    song["thumbnail_path"] = thumb_result.get("path", "")
+                    if thumb_result["status"] == "ok":
+                        print(f"[nightly] Thumbnail generated: {os.path.basename(thumbnail_path)}")
+                else:
+                    song["thumbnail_path"] = ""
             else:
                 song["mp4_path"] = ""
                 song["visualizer_status"] = "skipped"
@@ -753,6 +780,8 @@ def run_pipeline(date_str, dry_run=False):
                         title=song["title"],
                         prompt=song.get("prompt", ""),
                         date_label=date_label,
+                        lyrics=song.get("lyrics", ""),
+                        thumbnail_path=song.get("thumbnail_path", ""),
                     )
                 song["youtube_video_id"] = upload_result.get("video_id", "")
                 song["youtube_url"] = upload_result.get("url", upload_result.get("youtube_url", ""))

@@ -257,6 +257,59 @@ def _probe_duration(file_path):
 
 
 # ---------------------------------------------------------------------------
+# Thumbnail generation
+# ---------------------------------------------------------------------------
+def generate_thumbnail(title, output_path, bg_image=None):
+    """
+    Generate a thumbnail image with title text overlay.
+
+    Args:
+        title: Song title to render
+        output_path: Path for output thumbnail image
+        bg_image: Optional background image path
+
+    Returns:
+        dict with keys: path, status (ok/failed), error (if failed)
+    """
+    if not _FFMPEG:
+        return {"path": "", "status": "failed", "error": "FFmpeg not found"}
+
+    if not bg_image:
+        bg_image = _find_background()
+
+    font_path = _find_cjk_font()
+    escaped = _escape_ffmpeg_text(title)
+
+    # Build background input
+    if bg_image and os.path.isfile(bg_image):
+        input_spec = ["-loop", "1", "-i", bg_image]
+        scale_filter = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2"
+    else:
+        input_spec = ["-f", "lavfi", "-i", "color=c=#0a0f1e:s=1280x720:d=1"]
+        scale_filter = "format=yuv420p"
+
+    cmd = [_FFMPEG, "-y"] + input_spec + [
+        "-vf",
+        f"{scale_filter},"
+        f"drawtext=text='{escaped}':"
+        f"fontfile={font_path}:"
+        f"fontcolor=white:fontsize=64:"
+        f"x=(w-text_w)/2:y=(h-text_h)/2:"
+        f"shadowcolor=black:shadowx=3:shadowy=3:"
+        f"expansion=none",
+        "-frames:v", "1",
+        "-q:v", "2",
+        output_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, timeout=30, capture_output=True)
+        return {"path": output_path, "status": "ok"}
+    except Exception as e:
+        print(f"[visualizer] Thumbnail generation failed: {e}", file=sys.stderr)
+        return {"path": "", "status": "failed", "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def main():

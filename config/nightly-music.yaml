@@ -41,10 +41,26 @@ youtube:
   category: "10"
   tags:
     - "AI Music"
-    - "MiniMax"
     - "华语流行"
+    - "AISong"
+    - "人工智能音乐"
+    - "AI歌曲"
+    - "华语情歌"
+    - "中文歌曲"
+    - "AI情歌"
+    - "AI生成音乐"
+    - "AI音乐 2026"
+    - "华语流行歌曲"
+    - "人工智能创作歌曲"
+    - "治愈系音乐"
+    - "睡前音乐"
+    - "MiniMax"
+    - "华语新歌推荐"
 
 # Visualizer settings
 visualizer:
   enabled: true
   resolution: "1920x1080"
+
+# API retry settings
+max_lyrics_retries: 3
