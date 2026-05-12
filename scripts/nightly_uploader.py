@@ -36,7 +36,7 @@ import pathlib
 # ---------------------------------------------------------------------------
 CREDENTIALS_PATH = "/mnt/d/Hermes/secrets/youtube-oauth.json"
 TOKEN_PATH = "/mnt/d/Hermes/secrets/youtube-oauth-token.json"
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = ["https://www.googleapis.com/auth/youtube"]
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 
