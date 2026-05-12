@@ -10,9 +10,33 @@ Mode: Builder
 
 Redesign the existing nightly AI music pipeline (2 songs/night via MiniMax API → Telegram) into a YouTube channel that auto-generates quality music daily with visualizers. Target: 500 subscribers in 1 month. Transparent about AI origin but focused on quality output.
 
-## What Makes This Cool
+## Builder Mode Questions
+
+These questions drove the office-hours design session. Builder mode — treating this as a side project with growth targets.
+
+### 1. What's the coolest version of this?
 
 AI-generated music that's actually good — uploaded daily to YouTube with visualizers, showing what's possible. Full YouTube experience: thumbnails, descriptions, playlists, channel branding. The pitch: "AI songs can be good. Here's proof, every day."
+
+### 2. Who is the audience?
+
+Two audiences:
+- **Primary:** AI-curious music listeners — people skeptical about AI music who need proof it can be good. They find the channel through YouTube recommendations, music subreddits, and AI discussion forums.
+- **Secondary:** AI/tech builders — developers and researchers interested in automated content pipelines. They find the channel through GitHub, Twitter, and technical blog posts about the architecture.
+
+### 3. What's the fastest path to something working?
+
+Extend the existing pipeline (already generating 2 songs/night) with a static visualizer and YouTube upload. Ship Phase 1 in 3-5 days → validate content quality and audience response → then scale to multi-agent architecture. The existing MiniMax API + Telegram pipeline is solid foundation — don't rebuild, extend.
+
+### 4. Who are the competitors and what are they doing?
+
+- **AI music channels on YouTube** — Most upload raw AI generations with no visualizer, no branding, no consistency. Quality is hit-or-miss. None publish daily.
+- **Human music curation channels** — High production value but slow release cycles and human-dependent. Not direct competition but sets the quality bar.
+- **Gap:** No channel combines consistent daily AI music + professional visualizers + transparent AI origin. That's the lane.
+
+### 5. If this was 10x better, what would it look like?
+
+A fully autonomous music channel: trending chart analysis → multi-song AI generation with animated lyrics videos → auto-clipped YouTube Shorts for every song → cross-posted to Twitter/Bilibili/TikTok → LLM-written video descriptions optimized for discovery → growth analytics that feed back into style selection. 500 subscribers in 1 month, 5,000 in 6 months. A case study for AI content creation that developers reference.
 
 ## Premises
 

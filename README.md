@@ -140,11 +140,8 @@ All secrets live outside the repo:
 
 | File | Purpose |
 |------|---------|
-| [DESIGN.md](DESIGN.md) | Pre-implementation design snapshot |
-| [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | Phase tracking and implementation status |
-| [Project_Instruction.md](Project_Instruction.md) | Original Phase 1 specification |
-| [AGENT_EXECUTION_PLAN.md](AGENT_EXECUTION_PLAN.md) | Old Phase 2 plan (superseded) |
-| [Phase2_Issues.md](Phase2_Issues.md) | Phase 2 issues tracker (resolved) |
+| [DESIGN.md](DESIGN.md) | Why we built it this way — office-hours design record |
+| [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | What's done, what's next — living tracker + original Phase 1 specs |
 
 ---
 

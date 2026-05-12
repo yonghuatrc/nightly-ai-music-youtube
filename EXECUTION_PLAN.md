@@ -80,15 +80,78 @@ All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup 
 
 ---
 
+## Reference: Original Phase 1 Specs (from 2026-05-05)
+
+Preserved from the original `Project_Instruction.md` specification. These defined the initial pipeline before YouTube integration.
+
+### Log Format
+
+**File:** `~/.hermes/work_logs/nightly-songs/song-log.json` (monthly rotation: `song-log-YYYY-MM.json`)
+
+```json
+{
+  "date": "2026-05-05",
+  "song_number": 1,
+  "language": "Chinese",
+  "language_for_prompt": "Chinese",
+  "style_source": "TikTok SG trending",
+  "style_reference": "仿林俊杰 抒情R&B 风格",
+  "prompt_used": "...",
+  "model": "MiniMax-Music",
+  "output_file": "/home/dennis/.hermes/nightly-songs/2026-05-05-song-1.mp3",
+  "lyrics": "..."
+}
+```
+
+**Dedup rule:** Before generating, read last 7 days of log. Reject any style that matches both `style_reference` AND `language`. Pick alternative trending song if collision.
+
+### Original Success Criteria (1-week trial)
+
+| Metric | Target |
+|--------|--------|
+| Successful generations | ≥ 12/14 songs (allow 2 failures) |
+| Morning notification rate | 7/7 days delivered by 9am |
+| Dedup compliance | 0 duplicate style+language pairs |
+| Audio playable | All files openable as MP3 |
+| YouTube publishable | Boss can take audio file → upload to YouTube |
+
+### Morning Notification Format
+
+```
+🌙 AI Music Daily — 2026-05-06
+
+🎵 Song #1: [Song Title]
+   Language: Chinese
+   Style: 仿林俊杰抒情R&B · TikTok SG trending
+   🎧 Audio: [file attached]
+   📝 Lyrics:
+   [full lyrics here]
+
+🎵 Song #2: [Song Title]
+   Language: English
+   Style: upbeat TikTok pop · female vocal
+   🎧 Audio: [file attached]
+   📝 Lyrics:
+   [full lyrics here]
+```
+
+### Risks & Mitigations (from Phase 1 spec)
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| MiniMax API downtime at 2am | Songs missed | Retry once; if still fail, skip and notify |
+| Song quality poor | Wasted nights | Boss can react to morning notification — adjust style prompt if needed |
+| Duplicate style selected | Less variety | 7-day dedup check is aggressive enough |
+| YouTube copyright claim | Channel risk | Boss is aware AI songs may trigger claims; project is explicit about AI origin |
+
+---
+
 ## Related Files
 
 | File | Location |
 |------|----------|
 | Design document | `DESIGN.md` |
 | Execution plan | `EXECUTION_PLAN.md` (this file) |
-| Original Phase 1 spec | `Project_Instruction.md` |
-| AGENT_EXECUTION_PLAN.md | `AGENT_EXECUTION_PLAN.md` |
-| Phase 2 issues | `Phase2_Issues.md` |
 | Pipeline script | `scripts/nightly_music.py` |
 | API wrapper | `scripts/minimax_music_api.py` |
 | Trending fetcher | `scripts/fetch_trending.py` |
