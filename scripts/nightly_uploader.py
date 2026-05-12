@@ -10,7 +10,7 @@ Prerequisites:
 
 First-time setup:
     1. Download OAuth client secret from Google Cloud Console
-    2. Save as ~/.hermes/secrets/youtube-oauth.json
+     2. Save as /mnt/d/Hermes/secrets/youtube-oauth.json
     3. Run: python3 nightly_uploader.py --setup-auth
     4. Follow browser prompt to authorize
 
@@ -34,8 +34,8 @@ import pathlib
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-CREDENTIALS_PATH = os.path.expanduser("~/.hermes/secrets/youtube-oauth.json")
-TOKEN_PATH = os.path.expanduser("~/.hermes/secrets/youtube-oauth-token.json")
+CREDENTIALS_PATH = "/mnt/d/Hermes/secrets/youtube-oauth.json"
+TOKEN_PATH = "/mnt/d/Hermes/secrets/youtube-oauth-token.json"
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
@@ -304,9 +304,21 @@ def _resumable_upload(request, max_retries=5):
                 if pct % 20 == 0:  # Log every 20%
                     print(f"[nightly:uploader] Progress: {pct}%")
         except HttpError as e:
-            if e.resp.status == 429 and retries < max_retries:
+            should_retry = (
+                e.resp.status == 429
+                or (500 <= e.resp.status < 600)
+            )
+            if should_retry and retries < max_retries:
                 wait = 2 ** retries
-                print(f"[nightly:uploader] Rate limited, retrying in {wait}s...")
+                print(f"[nightly:uploader] HTTP {e.resp.status}, retrying in {wait}s...")
+                time.sleep(wait)
+                retries += 1
+            else:
+                raise
+        except ConnectionError as e:
+            if retries < max_retries:
+                wait = 2 ** retries
+                print(f"[nightly:uploader] ConnectionError, retrying in {wait}s...")
                 time.sleep(wait)
                 retries += 1
             else:
@@ -345,7 +357,7 @@ def main():
     parser.add_argument("--publish-at", type=str, default=None,
                         help="RFC 3339 publish time for scheduling")
     parser.add_argument("--setup-auth", action="store_true",
-                        help="Run interactive OAuth setup")
+                        help="Run interactive OAuth setup (credentials from /mnt/d/Hermes/secrets/youtube-oauth.json)")
     args = parser.parse_args()
 
     if args.setup_auth:

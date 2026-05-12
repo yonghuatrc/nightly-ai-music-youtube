@@ -40,6 +40,7 @@ D_DRIVE_BASE = os.path.expanduser("/mnt/d/Hermes/songs/nightly-songs")
 
 
 sys.path.insert(0, SCRIPTS_DIR)
+sys.path.insert(0, "/home/dennis/.hermes/venv/lib/python3.12/site-packages")
 from minimax_music_api import generate_and_save
 
 # Optional imports — visualizer and YouTube uploader (graceful fallback)
@@ -165,7 +166,6 @@ def fetch_trending(sources, count):
 # ---------------------------------------------------------------------------
 # Title extraction
 # ---------------------------------------------------------------------------
-TITLE_BRACKET_PATTERN = re.compile(r"^\[.*\]$")
 
 
 def extract_title(music_name, lyrics, fallback_style, song_num):
@@ -564,6 +564,7 @@ def run_pipeline(date_str, dry_run=False):
     songs_per_msg = config.get("telegram", {}).get("songs_per_message", 5)
     output_dir = os.path.expanduser(config.get("output_dir", SONGS_BASE))
     d_drive_dir = os.path.expanduser(config.get("d_drive_mirror", D_DRIVE_BASE))
+    config_lang = config.get("language", "Chinese")
 
     # Validate sources against known list
     KNOWN_SOURCES = {"qq-douyin", "kkbox", "my-fm", "pool"}
@@ -605,7 +606,7 @@ def run_pipeline(date_str, dry_run=False):
                 removed = []
                 for t in trending:
                     style_key = f"{t.get('artist', '')} - {t.get('song', '')}"
-                    lang = "Chinese"
+                    lang = config_lang
                     if (style_key, lang) in blocked_keys:
                         removed.append(style_key)
                     else:
@@ -615,6 +616,24 @@ def run_pipeline(date_str, dry_run=False):
                     trending = filtered
     except Exception as e:
         print(f"[nightly] Dedup check failed (non-fatal): {e}", file=sys.stderr)
+
+    # If dedup filtered out too many songs, supplement from pool
+    if len(trending) < song_count:
+        needed = song_count - len(trending)
+        print(f"[nightly] Dedup left {len(trending)} songs, supplementing {needed} from pool")
+        pool_result = subprocess.run(
+            [sys.executable, FETCH_SCRIPT, "--source", "pool", "--count", str(needed * 2)],
+            capture_output=True, text=True, timeout=15,
+        )
+        if pool_result.returncode == 0:
+            pool_songs = json.loads(pool_result.stdout)
+            for ps in pool_songs:
+                style_key = f"{ps.get('artist', '')} - {ps.get('song', '')}"
+                if (style_key, config_lang) not in blocked_keys:
+                    trending.append(ps)
+                    if len(trending) >= song_count:
+                        break
+        print(f"[nightly] After pool fill: {len(trending)} trending songs")
 
     # Step 3: Generate songs
     song_results = []
@@ -673,13 +692,7 @@ def run_pipeline(date_str, dry_run=False):
         successes = sum(1 for r in song_results if r["status"] == "success")
         print(f"[nightly] Progress: {successes}/{len(song_results)} successful\n")
 
-    # Step 4: Sync to D-drive
-    if not dry_run:
-        sync_to_d_drive(songs_dir, d_drive_target)
-    else:
-        print(f"[nightly] [DRY RUN] Would sync: {songs_dir} → {d_drive_target}")
-
-    # Step 4.5: Generate visualizers
+    # Step 4: Generate visualizers
     visualizer_enabled = config.get("visualizer", {}).get("enabled", True)
     visualizer_results = []
     if visualizer_enabled:
@@ -717,7 +730,7 @@ def run_pipeline(date_str, dry_run=False):
             song["mp4_path"] = ""
             song["visualizer_status"] = "disabled"
 
-    # Step 4.6: Upload to YouTube
+    # Step 5: Upload to YouTube
     youtube_cfg = config.get("youtube", {})
     youtube_enabled = youtube_cfg.get("enabled", False)
     youtube_results = []
@@ -754,13 +767,19 @@ def run_pipeline(date_str, dry_run=False):
             song["youtube_url"] = ""
             song["youtube_status"] = "disabled"
 
-    # Step 5: Log
+    # Step 6: Sync to D-drive
+    if not dry_run:
+        sync_to_d_drive(songs_dir, d_drive_target)
+    else:
+        print(f"[nightly] [DRY RUN] Would sync: {songs_dir} → {d_drive_target}")
+
+    # Step 7: Log
     log_entries = []
     for r in song_results:
         log_entries.append({
             "date": date_label,
             "song_number": r["song_number"],
-            "language": "Chinese",
+            "language": config_lang,
             "style_source": "|".join(sources) if isinstance(sources, list) else sources,
             "style_reference": f"{r.get('trending_artist', '')} - {r.get('trending_song', '')}",
             "prompt_used": r.get("prompt", ""),
@@ -787,12 +806,30 @@ def run_pipeline(date_str, dry_run=False):
     else:
         print(f"[nightly] [DRY RUN] Would log {len(log_entries)} entries")
 
-    # Step 6: Telegram delivery
+    # Step 8: Telegram delivery
     successful_songs = [r for r in song_results if r["status"] == "success"]
     failed_songs = [r for r in song_results if r["status"] == "failed"]
 
     if not dry_run:
-        # If more than half failed, send alert
+        # Always deliver successful songs (if any exist)
+        if successful_songs:
+            batches = []
+            current_batch = []
+            for r in successful_songs:
+                current_batch.append(r)
+                if len(current_batch) >= songs_per_msg:
+                    batches.append(current_batch)
+                    current_batch = []
+            if current_batch:
+                batches.append(current_batch)
+
+            total_batches = len(batches)
+            for idx, batch in enumerate(batches):
+                send_telegram_batch(batch, idx + 1, total_batches, date_label)
+                if idx < total_batches - 1:
+                    time.sleep(3)  # Rate limit between batches
+
+        # Additionally, send alert if high failure rate (supplemental, not replacement)
         if len(failed_songs) >= len(song_results) // 2:
             failure_msg = (
                 f"⚠️ Nightly AI Music — {date_label}\n"
@@ -811,45 +848,28 @@ def run_pipeline(date_str, dry_run=False):
                 print(f"[nightly] Alert sent: high failure rate")
             except Exception as e:
                 print(f"[nightly] High-failure alert FAILED: {e}", file=sys.stderr)
-        else:
-            # Batch deliver
-            batches = []
-            current_batch = []
-            for r in successful_songs:
-                current_batch.append(r)
-                if len(current_batch) >= songs_per_msg:
-                    batches.append(current_batch)
-                    current_batch = []
-            if current_batch:
-                batches.append(current_batch)
 
-            total_batches = len(batches)
-            for idx, batch in enumerate(batches):
-                send_telegram_batch(batch, idx + 1, total_batches, date_label)
-                if idx < total_batches - 1:
-                    time.sleep(3)  # Rate limit between batches
-
-            # Send failed songs summary if any
-            if failed_songs:
-                fail_summary = "\n".join(
-                    f"❌ Song #{r['song_number']}: {r.get('error', 'unknown')}"
-                    for r in failed_songs
+        # Always report individual failures
+        if failed_songs:
+            fail_summary = "\n".join(
+                f"❌ Song #{r['song_number']}: {r.get('error', 'unknown')}"
+                for r in failed_songs
+            )
+            fail_msg = (
+                f"⚠️ Nightly AI Music — {date_label}\n"
+                f"{len(failed_songs)} song(s) failed to generate:\n{fail_summary}"
+            )
+            import requests
+            _, CHAT_ID, TELEGRAM_API = _ensure_telegram()
+            try:
+                resp = requests.post(
+                    f"{TELEGRAM_API}/sendMessage",
+                    data={"chat_id": CHAT_ID, "text": fail_msg},
+                    timeout=30,
                 )
-                fail_msg = (
-                    f"⚠️ Nightly AI Music — {date_label}\n"
-                    f"{len(failed_songs)} song(s) failed to generate:\n{fail_summary}"
-                )
-                import requests
-                _, CHAT_ID, TELEGRAM_API = _ensure_telegram()
-                try:
-                    resp = requests.post(
-                        f"{TELEGRAM_API}/sendMessage",
-                        data={"chat_id": CHAT_ID, "text": fail_msg},
-                        timeout=30,
-                    )
-                    resp.raise_for_status()
-                except Exception as e:
-                    print(f"[nightly] Failed summary send FAILED: {e}", file=sys.stderr)
+                resp.raise_for_status()
+            except Exception as e:
+                print(f"[nightly] Failed summary send FAILED: {e}", file=sys.stderr)
     else:
         print(f"[nightly] [DRY RUN] Would send {len(successful_songs)} songs in batches of {songs_per_msg}")
 
