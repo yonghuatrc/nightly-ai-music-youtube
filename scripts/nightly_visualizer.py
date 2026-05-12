@@ -69,6 +69,7 @@ def _find_cjk_font():
 def _find_background():
     """Find a background image from assets. Returns path or None."""
     candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "backgrounds"),
         os.path.expanduser("~/.hermes/songs/assets/backgrounds/"),
         os.path.expanduser("/mnt/d/Hermes/songs/assets/backgrounds/"),
     ]

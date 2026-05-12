@@ -1,9 +1,9 @@
 # Nightly AI Music Configuration
 # Edit this file from Windows to change behavior — no code changes needed.
-# Script reads from: /mnt/d/Hermes/config/nightly-music.yaml
+# Script reads from: config/nightly-music.yaml (project-relative via PROJECT_DIR)
 
 # Number of songs to generate each night
-song_count: 10
+song_count: 2  # Phase 1: 2 songs/night. Increase for Phase 2
 
 # Language configuration:
 #   "chinese-only"  — All songs in Chinese (default)
@@ -21,7 +21,6 @@ trending_source:
   - "qq-douyin"
   - "kkbox"
   - "my-fm"
-  - "spotify"
 
 # Telegram batching:
 #   songs_per_message: Max songs per Telegram message (default: 5)
@@ -30,13 +29,14 @@ telegram:
   songs_per_message: 5
 
 # Output directories (YEAR-MONTH-DAY subfolder created automatically)
-output_dir: "~/.hermes/songs/nightly-songs"
+# output_dir defaults to: <project>/output/
+# d_drive_mirror defaults to: /mnt/d/Hermes/songs/nightly-songs
 d_drive_mirror: "/mnt/d/Hermes/songs/nightly-songs"
 
 # YouTube integration (set enabled: true after OAuth setup)
 # Setup: python3 scripts/nightly_uploader.py --setup-auth
 youtube:
-  enabled: false
+  enabled: true
   privacy: "private"
   category: "10"
   tags:

@@ -17,7 +17,8 @@ import sys
 from datetime import datetime, timedelta
 
 
-LOG_DIR = os.path.expanduser("~/.hermes/work_logs/nightly-songs")
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_DIR = os.path.join(PROJECT_DIR, "logs")
 
 
 def load_recent_entries(days=7):

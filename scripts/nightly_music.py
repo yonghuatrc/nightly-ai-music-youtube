@@ -29,14 +29,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Paths
+# Paths — project-relative via PROJECT_DIR
 # ---------------------------------------------------------------------------
-SCRIPTS_DIR = os.path.expanduser("~/.hermes/scripts")
-CONFIG_PATH = "/mnt/d/Hermes/config/nightly-music.yaml"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.join(PROJECT_DIR, "scripts")
+CONFIG_PATH = os.path.join(PROJECT_DIR, "config", "nightly-music.yaml")
 FETCH_SCRIPT = os.path.join(SCRIPTS_DIR, "fetch_trending.py")
 DEDUP_SCRIPT = os.path.join(SCRIPTS_DIR, "check-duplicate.py")
-SONGS_BASE   = os.path.expanduser("~/.hermes/songs/nightly-songs")
+SONGS_BASE   = os.path.join(PROJECT_DIR, "output")
 D_DRIVE_BASE = os.path.expanduser("/mnt/d/Hermes/songs/nightly-songs")
+LOG_DIR = os.path.join(PROJECT_DIR, "logs")
+ASSETS_DIR = os.path.join(PROJECT_DIR, "assets", "backgrounds")
 
 
 sys.path.insert(0, SCRIPTS_DIR)
@@ -272,9 +275,8 @@ def generate_song(prompt, song_num, songs_dir, date_label, max_lyrics_retries=2)
 def append_log(entries, date_label):
     """Append song entries to monthly song-log file. Idempotent per date."""
     month_key = date_label[:7]  # e.g. "2026-05"
-    log_dir = os.path.expanduser("~/.hermes/work_logs/nightly-songs")
-    log_path = os.path.join(log_dir, f"song-log-{month_key}.json")
-    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(LOG_DIR, f"song-log-{month_key}.json")
+    os.makedirs(LOG_DIR, exist_ok=True)
 
     existing = []
     if os.path.exists(log_path):
@@ -320,7 +322,7 @@ def sync_to_d_drive(src_dir, d_drive_dir):
 # Telegram bot
 # ---------------------------------------------------------------------------
 def _load_telegram_config():
-    env_path = os.path.expanduser("~/.hermes/.env")
+    env_path = os.path.expanduser(os.environ.get("HERMES_ENV", "~/.hermes/.env"))
     bot_token = None
     chat_id = "1188842054"
     with open(env_path) as f:
@@ -897,12 +899,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.song_number:
-        print("[nightly] --song-number is deprecated. Use --date only (generates all songs).")
-        print("[nightly] Falling back to old single-song mode...")
-        # Import and run old single-song function
-        from nightly_music_old import run_song
-        ok = run_song(args.song_number, args.date)
-        sys.exit(0 if ok else 1)
+        print("[nightly] --song-number is deprecated. Use --date only (generates all songs).",
+              file=sys.stderr)
+        sys.exit(1)
 
     ok = run_pipeline(args.date, dry_run=args.dry_run)
     sys.exit(0 if ok else 1)
