@@ -50,9 +50,23 @@ from minimax_music_api import generate_and_save
 try:
     from nightly_visualizer import generate_visualizer as _generate_visualizer
     from nightly_visualizer import generate_thumbnail as _generate_thumbnail
+    from nightly_visualizer import generate_per_song_assets as _generate_per_song_assets
+    from nightly_visualizer import generate_short as _generate_short
 except ImportError:
     _generate_visualizer = None
     _generate_thumbnail = None
+    _generate_per_song_assets = None
+    _generate_short = None
+
+try:
+    import image_gen
+except ImportError:
+    image_gen = None
+
+try:
+    import prompt_gen
+except ImportError:
+    prompt_gen = None
 
 try:
     from nightly_uploader import upload_video as _upload_video
@@ -555,6 +569,82 @@ def upload_to_youtube(video_path, title, prompt, date_label, lyrics="", thumbnai
 
 
 # ---------------------------------------------------------------------------
+# Shorts upload wrapper
+# ---------------------------------------------------------------------------
+def upload_shorts_to_youtube(short_path, title, prompt, date_label, lyrics="", thumbnail_path=""):
+    """
+    Upload a Short to YouTube with Shorts-optimized metadata.
+    Scheduled at 12:00 SGT (noon, before the main video at 18:00).
+    Gracefully handles missing deps. Returns dict with status.
+    """
+    if _upload_video is None:
+        print("[nightly] YouTube uploader module not available — skipping Shorts upload",
+              file=sys.stderr)
+        return {"video_id": "", "youtube_url": "", "status": "skipped", "error": "Module not loaded"}
+
+    config = load_config()
+    yt_cfg = config.get("youtube", {})
+    shorts_cfg = config.get("shorts", {})
+
+    if not yt_cfg.get("enabled", False):
+        print("[nightly] YouTube upload disabled in config — skipping Shorts upload")
+        return {"video_id": "", "youtube_url": "", "status": "disabled", "error": None}
+
+    # Shorts-optimized description
+    lyrics_lines = [l for l in lyrics.split("\n") if l.strip() and not l.startswith("[")]
+    lyrics_snippet = "\n".join(lyrics_lines[:2]) if lyrics_lines else "🎶"
+
+    description = (
+        f"🎵 {title} — AI创作的华语流行歌曲片段\n\n"
+        f"完整歌曲每日18:00发布！\n"
+        f"🎤 灵感来源: {prompt}\n"
+        f"📅 发布日期: {date_label}\n\n"
+        f"📝 歌词:\n{lyrics_snippet}\n\n"
+        f"💬 喜欢的话点赞评论！\n"
+        f"🔔 订阅频道，每天收听新歌！\n\n"
+        f"---\n"
+        f"此歌曲由 AI 生成 (MiniMax music-2.6)\n"
+        f"#Shorts #AIMusic #华语流行 #AISong #人工智能音乐 #AI歌曲"
+    )
+
+    # Build tags: start with config tags, ensure #Shorts is included
+    tags = list(shorts_cfg.get("tags", yt_cfg.get("tags", ["AI Music"])))
+
+    privacy = yt_cfg.get("privacy", "private")
+    category = yt_cfg.get("category", "10")
+
+    # Compute publish_at: 12:00 SGT on the target date
+    publish_at = None
+    try:
+        from datetime import datetime, timezone, timedelta
+        sgt = timezone(timedelta(hours=8))
+        upload_time = shorts_cfg.get("upload_time", "12:00")
+        hour, minute = map(int, upload_time.split(":"))
+        publish_dt = datetime.strptime(date_label, "%Y-%m-%d").replace(
+            hour=hour, minute=minute, second=0, tzinfo=sgt
+        )
+        publish_at = publish_dt.isoformat()
+    except Exception as e:
+        print(f"[nightly] WARNING: Shorts publish_at calculation failed: {e}", file=sys.stderr)
+
+    try:
+        return _upload_video(
+            video_path=short_path,
+            title=title,
+            description=description,
+            tags=tags,
+            category_id=category,
+            privacy=privacy,
+            thumbnail_path=thumbnail_path,
+            publish_at=publish_at,
+            is_short=True,
+        )
+    except Exception as e:
+        print(f"[nightly] Shorts upload exception: {e}", file=sys.stderr)
+        return {"video_id": "", "youtube_url": "", "status": "failed", "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 def run_pipeline(date_str, dry_run=False):
@@ -759,6 +849,79 @@ def run_pipeline(date_str, dry_run=False):
             song["mp4_path"] = ""
             song["visualizer_status"] = "disabled"
 
+    # Step 4.5: Generate per-song backgrounds + Shorts
+    shorts_cfg = config.get("shorts", {})
+    shorts_enabled = shorts_cfg.get("enabled", True)
+    if shorts_enabled:
+        for song in song_results:
+            if song["status"] != "success":
+                song["bg_path"] = ""
+                song["bg_vertical_path"] = ""
+                song["short_path"] = ""
+                song["short_status"] = "skipped"
+                continue
+
+            title = song["title"]
+            safe = sanitize_filename(title)
+            song_num = song["song_number"]
+
+            # Generate per-song background images
+            if _generate_per_song_assets:
+                if dry_run:
+                    print(f"[nightly] [DRY RUN] Would generate per-song assets for: {title[:50]}")
+                    song["bg_path"] = os.path.join(songs_dir, f"{song_num:02d}-{safe}-bg.jpg")
+                    song["bg_vertical_path"] = os.path.join(songs_dir, f"{song_num:02d}-{safe}-bg-vertical.jpg")
+                    song["thumbnail_path"] = os.path.join(songs_dir, f"{song_num:02d}-{safe}-thumb.jpg")
+                else:
+                    try:
+                        _generate_per_song_assets(song, songs_dir, config)
+                    except Exception as e:
+                        print(f"[nightly] Per-song assets failed for #{song_num}: {e}", file=sys.stderr)
+                        song["bg_path"] = ""
+                        song["bg_vertical_path"] = ""
+            else:
+                print("[nightly] generate_per_song_assets module not available — skipping")
+                song["bg_path"] = ""
+                song["bg_vertical_path"] = ""
+
+            # Generate Shorts video
+            short_path = os.path.join(songs_dir, f"{song_num:02d}-{safe}-short.mp4")
+            if _generate_short and os.path.exists(song.get("mp3_path", "")):
+                if dry_run:
+                    print(f"[nightly] [DRY RUN] Would generate Short: {os.path.basename(short_path)}")
+                    song["short_path"] = short_path
+                    song["short_status"] = "ok"
+                else:
+                    try:
+                        short_result = _generate_short(
+                            mp3_path=song["mp3_path"],
+                            title=title,
+                            lyrics=song.get("lyrics", ""),
+                            output_path=short_path,
+                            bg_path=song.get("bg_vertical_path", ""),
+                            max_duration=shorts_cfg.get("duration_sec", 45),
+                        )
+                        song["short_path"] = short_result.get("path", "")
+                        song["short_status"] = short_result.get("status", "failed")
+                        if short_result["status"] == "ok":
+                            print(f"[nightly] Short OK: {os.path.basename(short_path)}")
+                    except Exception as e:
+                        print(f"[nightly] Short generation failed for #{song_num}: {e}", file=sys.stderr)
+                        song["short_path"] = ""
+                        song["short_status"] = "failed"
+            else:
+                song["short_path"] = ""
+                song["short_status"] = "skipped"
+                if not _generate_short:
+                    print("[nightly] generate_short module not available — skipping Shorts", file=sys.stderr)
+    else:
+        print("[nightly] Shorts disabled in config — skipping")
+        for song in song_results:
+            song["bg_path"] = ""
+            song["bg_vertical_path"] = ""
+            song["short_path"] = ""
+            song["short_status"] = "disabled"
+
     # Step 5: Upload to YouTube
     youtube_cfg = config.get("youtube", {})
     youtube_enabled = youtube_cfg.get("enabled", False)
@@ -798,6 +961,39 @@ def run_pipeline(date_str, dry_run=False):
             song["youtube_url"] = ""
             song["youtube_status"] = "disabled"
 
+    # Step 5.5: Upload Shorts to YouTube
+    if shorts_enabled:
+        for song in song_results:
+            if (song["status"] == "success"
+                    and song.get("short_status") == "ok"
+                    and os.path.exists(song.get("short_path", ""))):
+                if dry_run:
+                    print(f"[nightly] [DRY RUN] Would upload Short: {song['title'][:50]}")
+                    song["short_youtube_id"] = f"DRY-RUN-SHORT-{song['song_number']:02d}"
+                    song["short_youtube_url"] = f"https://youtube.com/shorts/DRY-RUN-{song['song_number']:02d}"
+                    song["short_upload_status"] = "ok"
+                else:
+                    upload_result = upload_shorts_to_youtube(
+                        short_path=song["short_path"],
+                        title=song["title"],
+                        prompt=song.get("prompt", ""),
+                        date_label=date_label,
+                        lyrics=song.get("lyrics", ""),
+                        thumbnail_path=song.get("thumbnail_path", ""),
+                    )
+                    song["short_youtube_id"] = upload_result.get("video_id", "")
+                    song["short_youtube_url"] = upload_result.get("url", upload_result.get("youtube_url", ""))
+                    song["short_upload_status"] = upload_result.get("status", "failed")
+            else:
+                song["short_youtube_id"] = ""
+                song["short_youtube_url"] = ""
+                song["short_upload_status"] = song.get("short_status", "skipped")
+    else:
+        for song in song_results:
+            song["short_youtube_id"] = ""
+            song["short_youtube_url"] = ""
+            song["short_upload_status"] = "disabled"
+
     # Step 6: Sync to D-drive
     if not dry_run:
         sync_to_d_drive(songs_dir, d_drive_target)
@@ -823,9 +1019,16 @@ def run_pipeline(date_str, dry_run=False):
             "size_mb": r.get("size_mb", 0),
             "mp4_path": r.get("mp4_path", ""),
             "visualizer_status": r.get("visualizer_status", ""),
+            "bg_path": r.get("bg_path", ""),
+            "bg_vertical_path": r.get("bg_vertical_path", ""),
+            "short_path": r.get("short_path", ""),
+            "short_status": r.get("short_status", ""),
             "youtube_video_id": r.get("youtube_video_id", ""),
             "youtube_url": r.get("youtube_url", ""),
             "youtube_status": r.get("youtube_status", ""),
+            "short_youtube_id": r.get("short_youtube_id", ""),
+            "short_youtube_url": r.get("short_youtube_url", ""),
+            "short_upload_status": r.get("short_upload_status", ""),
             "d_drive_synced": not dry_run,
             "telegram_sent": False,
             "status": r["status"],

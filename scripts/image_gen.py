@@ -22,15 +22,20 @@ Usage:
 
 import os
 import sys
+import time
+import urllib.parse
 import requests
 import argparse
+from PIL import Image
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 BASE_URL = "https://image.pollinations.ai/prompt"
+POLLINATIONS_BASE = "https://image.pollinations.ai/prompt"
 DEFAULT_MODEL = "flux"
 DEFAULT_TIMEOUT = 120  # seconds (Pollinations can take 30-90s)
+_last_request_time = 0
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +163,7 @@ def generate_thumbnail(song_title, style_tags="", seed=None, out_path=None):
     return generate(prompt, width=1280, height=720, model=DEFAULT_MODEL, seed=seed, out_path=out_path)
 
 
-def generate_background(seed=None, out_path=None):
+def generate_default_background(seed=None, out_path=None):
     """
     Generate a dark atmospheric background (1920x1080) for the visualizer.
     Smooth gradient suitable for text and waveform overlay.
@@ -170,6 +175,102 @@ def generate_background(seed=None, out_path=None):
         "cinematic dark mood"
     )
     return generate(prompt, width=1920, height=1080, model=DEFAULT_MODEL, seed=seed, out_path=out_path)
+
+
+# ---------------------------------------------------------------------------
+# Rate-limited Pollinations.ai download (for per-song background generation)
+# ---------------------------------------------------------------------------
+def download_pollinations_image(prompt, output_path, width=1920, height=1080, seed=None, model="flux"):
+    """Download an image from Pollinations.ai with rate limiting (15s min gap).
+
+    Args:
+        prompt: Image description text
+        output_path: Where to save the image
+        width: Output width in pixels
+        height: Output height in pixels
+        seed: Random seed (None = auto)
+        model: Model name (default: flux)
+
+    Returns:
+        output_path on success
+
+    Raises:
+        RuntimeError on failure or too-small image
+    """
+    global _last_request_time
+
+    # Rate limiting: ensure at least 15s between requests
+    elapsed = time.time() - _last_request_time
+    if elapsed < 15:
+        sleep_sec = 15 - elapsed
+        print(f"[image_gen] Rate limit: waiting {sleep_sec:.1f}s...")
+        time.sleep(sleep_sec)
+
+    prompt_safe = urllib.parse.quote(prompt[:1000])
+    seed_val = seed or int(time.time())
+    url = (
+        f"{POLLINATIONS_BASE}/{prompt_safe}"
+        f"?width={width}&height={height}&seed={seed_val}&nologo=true"
+    )
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    print(f"[image_gen] Downloading {width}x{height} → {os.path.basename(output_path)}")
+    resp = requests.get(url, timeout=120)
+    resp.raise_for_status()
+
+    with open(output_path, "wb") as f:
+        f.write(resp.content)
+
+    _last_request_time = time.time()
+
+    # Validate image is reasonable
+    size_bytes = os.path.getsize(output_path)
+    if size_bytes < 5000:
+        os.remove(output_path)
+        raise RuntimeError(
+            f"Image too small ({size_bytes} bytes) — likely a generation failure"
+        )
+
+    size_kb = size_bytes / 1024
+    print(f"[image_gen] Saved: {output_path} ({size_kb:.1f} KB)")
+    return output_path
+
+
+def generate_background(prompt, output_path, width=1920, height=1080, seed=None):
+    """Generate a background image via Pollinations.ai from a custom prompt.
+
+    Args:
+        prompt: Pollinations.ai image prompt
+        output_path: Where to save the image
+        width: Output width (default 1920)
+        height: Output height (default 1080)
+        seed: Optional random seed
+
+    Returns:
+        output_path on success
+    """
+    prompt_clean = f"{prompt.strip(', ')}"
+    return download_pollinations_image(prompt_clean, output_path, width, height, seed)
+
+
+def generate_thumbnail_from_bg(bg_path, output_path, size=(1280, 720)):
+    """Resize a background image to YouTube thumbnail size using Pillow.
+
+    Args:
+        bg_path: Source background image path
+        output_path: Where to save the thumbnail JPEG
+        size: Desired dimensions (default 1280x720)
+
+    Returns:
+        output_path on success
+    """
+    img = Image.open(bg_path)
+    img = img.resize(size, Image.LANCZOS)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    img.save(output_path, "JPEG", quality=85)
+    size_kb = os.path.getsize(output_path) / 1024
+    print(f"[image_gen] Thumbnail: {output_path} ({size_kb:.1f} KB)")
+    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +311,7 @@ def main():
             with open(args.out, "wb") as f:
                 f.write(data)
         elif args.type == "background":
-            data = generate_background(seed=args.seed)
+            data = generate_default_background(seed=args.seed)
             with open(args.out, "wb") as f:
                 f.write(data)
         else:  # custom

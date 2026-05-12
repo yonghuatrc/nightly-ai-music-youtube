@@ -171,6 +171,7 @@ def upload_video(
     privacy="private",
     thumbnail_path=None,
     publish_at=None,
+    is_short=False,
 ):
     """
     Upload a video to YouTube with resumable upload.
@@ -185,6 +186,7 @@ def upload_video(
         thumbnail_path: Optional path to thumbnail image
         publish_at: Optional RFC 3339 datetime for scheduled publishing.
                     When set, privacy is forced to "private".
+        is_short: If True, appends #Shorts to tags (for Shorts metadata).
 
     Returns:
         dict with keys: video_id, youtube_url, status, error (if failed)
@@ -222,6 +224,16 @@ def upload_video(
         result["error"] = f"Auth failed: {e}"
         print(f"[nightly:uploader] {result['error']}", file=sys.stderr)
         return result
+
+    # Auto-append #Shorts for Shorts uploads
+    if is_short:
+        short_tag = "#Shorts"
+        if short_tag not in tags:
+            tags = list(tags) + [short_tag]
+        # Truncate title with #Shorts prefix awareness
+        short_prefix = " #Shorts"
+        if not title.endswith(short_prefix) and len(title) + len(short_prefix) <= 100:
+            title = title + short_prefix
 
     # Build request body
     body = {

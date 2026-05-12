@@ -62,5 +62,26 @@ visualizer:
   enabled: true
   resolution: "1920x1080"
 
+# Shorts generation — YouTube Shorts (9:16 vertical, chorus-based)
+# Each song gets a Short clipped to the loudest 45-second segment.
+shorts:
+  enabled: true
+  duration_sec: 45
+  upload_time: "12:00"
+  tags:
+    - "#Shorts"
+    - "AIMusic"
+    - "华语流行"
+    - "AI中文歌"
+    - "AI歌曲"
+
+# Visual asset generation (per-song backgrounds + thumbnails via Pollinations.ai)
+visual:
+  enabled: true
+  generate_backgrounds: true
+  generate_thumbnails: true
+  llm_prompt_source: "minimax"
+  pollinations_delay: 15
+
 # API retry settings
 max_lyrics_retries: 3

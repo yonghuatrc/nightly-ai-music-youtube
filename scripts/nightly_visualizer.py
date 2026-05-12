@@ -28,7 +28,7 @@ _api_generate_background = None
 
 try:
     import image_gen
-    _api_generate_background = image_gen.generate_background
+    _api_generate_background = image_gen.generate_default_background
 except ImportError:
     # Fallback: scripts/ dir might not be on sys.path
     _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -36,9 +36,24 @@ except ImportError:
         sys.path.insert(0, _script_dir)
     try:
         import image_gen  # type: ignore
-        _api_generate_background = image_gen.generate_background
+        _api_generate_background = image_gen.generate_default_background
     except ImportError:
         _api_generate_background = None
+
+# prompt_gen — per-song image prompt generation from lyrics
+_prompt_gen_module = None
+try:
+    import prompt_gen
+    _prompt_gen_module = prompt_gen
+except ImportError:
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    if _script_dir not in sys.path:
+        sys.path.insert(0, _script_dir)
+    try:
+        import prompt_gen  # type: ignore
+        _prompt_gen_module = prompt_gen
+    except ImportError:
+        _prompt_gen_module = None
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +374,438 @@ def generate_thumbnail(title, output_path, bg_image=None):
     except Exception as e:
         print(f"[visualizer] Thumbnail generation failed: {e}", file=sys.stderr)
         return {"path": "", "status": "failed", "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Per-song asset generation (backgrounds + thumbnails via Pollinations.ai)
+# ---------------------------------------------------------------------------
+def generate_per_song_assets(song_result, songs_dir, config=None):
+    """Generate per-song background images and thumbnail for a single song.
+
+    Uses prompt_gen (LLM) to create image prompts from song title/lyrics,
+    then downloads via Pollinations.ai. All steps are try/except so failures
+    don't block the pipeline.
+
+    Args:
+        song_result: Song result dict (must have title, lyrics, song_number keys)
+        songs_dir: Output directory
+        config: Optional config dict (uses visual section)
+
+    Returns:
+        Updated song_result dict with bg_path, bg_vertical_path, thumbnail_path keys
+    """
+    _ensure_script_dir_on_path()
+
+    if config is None:
+        config = {}
+
+    visual_cfg = config.get("visual", {})
+    if not visual_cfg.get("generate_backgrounds", True):
+        print("[nightly:visualizer] Background generation disabled in config")
+        song_result["bg_path"] = ""
+        song_result["bg_vertical_path"] = ""
+        song_result["thumbnail_path"] = song_result.get("thumbnail_path", "")
+        return song_result
+
+    title = song_result.get("title", "Unknown")
+    lyrics = song_result.get("lyrics", "")
+    style_tags = ""
+    song_num = song_result.get("song_number", 0)
+    safe = _sanitize_for_filename(title)
+
+    bg_path = os.path.join(songs_dir, f"{song_num:02d}-{safe}-bg.jpg")
+    bg_vertical_path = os.path.join(songs_dir, f"{song_num:02d}-{safe}-bg-vertical.jpg")
+    thumb_path = os.path.join(songs_dir, f"{song_num:02d}-{safe}-thumb.jpg")
+
+    # Step A: Generate landscape prompt → download background
+    try:
+        landscape_result = _safe_generate_prompt(title, lyrics, style_tags, "landscape")
+        if landscape_result:
+            print(f"[nightly:visualizer] Landscape prompt ({landscape_result['source']}): "
+                  f"{landscape_result['prompt'][:60]}...")
+            image_gen.generate_background(
+                landscape_result["prompt"], bg_path, 1920, 1080
+            )
+            song_result["bg_path"] = bg_path
+            print(f"[nightly:visualizer] Background saved: {os.path.basename(bg_path)}")
+        else:
+            print("[nightly:visualizer] No landscape prompt generated — skipping bg")
+            song_result["bg_path"] = ""
+    except Exception as e:
+        print(f"[nightly:visualizer] Landscape background failed: {e}", file=sys.stderr)
+        song_result["bg_path"] = ""
+
+    # Step B: Generate vertical prompt → download vertical background for Shorts
+    try:
+        vertical_result = _safe_generate_prompt(title, lyrics, style_tags, "vertical")
+        if vertical_result:
+            print(f"[nightly:visualizer] Vertical prompt ({vertical_result['source']}): "
+                  f"{vertical_result['prompt'][:60]}...")
+            image_gen.generate_background(
+                vertical_result["prompt"], bg_vertical_path, 1080, 1920
+            )
+            song_result["bg_vertical_path"] = bg_vertical_path
+            print(f"[nightly:visualizer] Vertical bg saved: {os.path.basename(bg_vertical_path)}")
+        else:
+            print("[nightly:visualizer] No vertical prompt generated — skipping vertical bg")
+            song_result["bg_vertical_path"] = ""
+    except Exception as e:
+        print(f"[nightly:visualizer] Vertical background failed: {e}", file=sys.stderr)
+        song_result["bg_vertical_path"] = ""
+
+    # Step C: Generate thumbnail from landscape background
+    if song_result.get("bg_path") and os.path.isfile(song_result["bg_path"]):
+        try:
+            image_gen.generate_thumbnail_from_bg(song_result["bg_path"], thumb_path)
+            song_result["thumbnail_path"] = thumb_path
+            print(f"[nightly:visualizer] Thumbnail generated from bg: {os.path.basename(thumb_path)}")
+        except Exception as e:
+            print(f"[nightly:visualizer] Thumbnail from bg failed: {e}", file=sys.stderr)
+    else:
+        print("[nightly:visualizer] No landscape bg available — thumbnail from bg skipped")
+
+    return song_result
+
+
+# ---------------------------------------------------------------------------
+# YouTube Shorts generation (9:16 vertical, chorus-based)
+# ---------------------------------------------------------------------------
+def generate_short(mp3_path, title, lyrics, output_path, bg_path=None, max_duration=45):
+    """Generate a YouTube Short (9:16 vertical video) from an MP3.
+
+    Detects the loudest N-second segment (chorus), extracts it, and renders
+    a 1080x1920 vertical video with waveform, title, and lyrics subtitles.
+
+    Args:
+        mp3_path: Path to input MP3 file
+        title: Song title for overlay text
+        lyrics: Song lyrics for subtitles
+        output_path: Path for output MP4
+        bg_path: Optional vertical background image (1080x1920)
+        max_duration: Shorts duration in seconds (default 45)
+
+    Returns:
+        dict with keys: path, status (ok/failed/skipped), error
+    """
+    result = {"path": "", "status": "failed", "error": None}
+
+    if not _FFMPEG:
+        result["error"] = "FFmpeg not found — Shorts skipped"
+        print(f"[nightly:visualizer] {result['error']}", file=sys.stderr)
+        return result
+
+    if not os.path.exists(mp3_path):
+        result["error"] = f"MP3 not found: {mp3_path}"
+        print(f"[nightly:visualizer] {result['error']}", file=sys.stderr)
+        return result
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    audio_duration = _probe_duration(mp3_path)
+    if audio_duration <= 0:
+        result["error"] = "Could not determine audio duration"
+        return result
+
+    # Find the loudest segment (chorus)
+    chorus_start = _find_loudest_window(mp3_path, max_duration)
+    actual_duration = min(max_duration, audio_duration - chorus_start)
+
+    # Temp files
+    temp_dir = os.path.join(output_dir, f".shorts-tmp-{int(time.time())}")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_audio = os.path.join(temp_dir, "chorus.mp3")
+    temp_srt = os.path.join(temp_dir, "subtitles.srt")
+
+    try:
+        # Extract chorus audio segment
+        _extract_audio_segment(mp3_path, temp_audio, chorus_start, actual_duration)
+        print(f"[nightly:visualizer] Chorus: {chorus_start:.1f}s – "
+              f"{chorus_start + actual_duration:.1f}s ({actual_duration:.1f}s)")
+
+        # Generate SRT subtitles from lyrics
+        srt_content = _generate_chorus_srt(lyrics, actual_duration)
+        if srt_content:
+            with open(temp_srt, "w", encoding="utf-8") as f:
+                f.write(srt_content)
+
+        # Resolve background
+        use_bg = bg_path and os.path.isfile(bg_path)
+
+        # Find font
+        font_path = _find_cjk_font()
+        has_font = bool(font_path)
+
+        # Escaped title
+        escaped_title = _escape_ffmpeg_text(title)
+
+        # Build FFmpeg command
+        cmd = [_FFMPEG, "-y"]
+
+        if use_bg:
+            cmd.extend(["-loop", "1", "-i", bg_path])
+        else:
+            cmd.extend(["-f", "lavfi", "-i", "color=c=#0a0f1e:s=1080x1920:r=1"])
+
+        cmd.extend(["-i", temp_audio])
+
+        # Build filter_complex
+        if use_bg:
+            bg_chain = (
+                "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+                "pad=1080:1920:(ow-iw)/2:(oh-ih)/2[bg]"
+            )
+        else:
+            bg_chain = "[0:v]setsar=1[bg]"
+
+        waves_chain = (
+            "[1:a]showwaves=s=1080x300:mode=cline:rate=25:"
+            "colors=#FF6B6B|#4ECDC4[waves]"
+        )
+
+        # Overlay: background + waveform + title + subtitles
+        overlay_parts = ["[bg][waves]overlay=0:H-380"]
+
+        if has_font:
+            overlay_parts.append(
+                f"drawtext=text='{escaped_title}':fontfile={font_path}:"
+                f"fontcolor=white:fontsize=56:"
+                f"x=(w-text_w)/2:y=80:expansion=none:"
+                f"shadowcolor=black:shadowx=3:shadowy=3"
+            )
+
+        if srt_content:
+            overlay_parts.append(
+                f"subtitles={temp_srt}:fontsdir={os.path.dirname(font_path) if font_path else '/'}"
+            )
+
+        overlay_chain = ",".join(overlay_parts) + "[out]"
+        filter_complex = ";".join([bg_chain, waves_chain, overlay_chain])
+
+        cmd.extend([
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-map", "1:a",
+            "-t", str(actual_duration),
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            output_path,
+        ])
+
+        print(f"[nightly:visualizer] Generating Short: {os.path.basename(output_path)}")
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if proc.returncode != 0:
+            stderr_tail = proc.stderr.strip().split("\n")[-5:]
+            result["error"] = f"FFmpeg exited {proc.returncode}: {'; '.join(stderr_tail)}"
+            print(f"[nightly:visualizer] Short FAILED: {result['error']}", file=sys.stderr)
+            return result
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+            result["error"] = "Short output file missing or too small"
+            print(f"[nightly:visualizer] {result['error']}", file=sys.stderr)
+            return result
+
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        dur = _probe_duration(output_path)
+        result["path"] = output_path
+        result["status"] = "ok"
+        result["duration"] = dur
+        print(f"[nightly:visualizer] Short OK — {size_mb:.1f}MB, {dur:.1f}s → {output_path}")
+
+    except subprocess.TimeoutExpired:
+        result["error"] = "FFmpeg timed out (10 min limit)"
+        print(f"[nightly:visualizer] {result['error']}", file=sys.stderr)
+    except Exception as e:
+        result["error"] = str(e)
+        print(f"[nightly:visualizer] Short exception: {e}", file=sys.stderr)
+    finally:
+        # Clean up temp dir
+        try:
+            for f in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, f))
+            os.rmdir(temp_dir)
+        except Exception:
+            pass
+
+    return result
+
+
+def _find_loudest_window(mp3_path, window_sec=45):
+    """Find the start time (seconds) of the loudest window_sec segment.
+
+    Uses ffprobe with astats to get per-second RMS loudness, then slides
+    a window across to find the segment with highest average loudness.
+    """
+    duration = _probe_duration(mp3_path)
+    if duration <= window_sec:
+        return 0.0
+
+    # Get per-second RMS values via ffprobe
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-f", "lavfi",
+            "-i", f"amovie={mp3_path},aresample=44100,astats=metadata=1:reset=44100",
+            "-show_entries", "frame_tags=lavfi.astats.Overall.RMS_level",
+            "-of", "csv=p=0",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            return max(0.0, (duration - window_sec) / 2)
+
+        rms_values = []
+        for line in proc.stdout.strip().split("\n"):
+            line = line.strip()
+            if line and line != "-inf":
+                try:
+                    rms_values.append(float(line))
+                except ValueError:
+                    pass
+
+        if len(rms_values) < 2:
+            return max(0.0, (duration - window_sec) / 2)
+
+        # Slide window to find loudest segment
+        window_samples = min(window_sec, len(rms_values))
+        if window_samples >= len(rms_values):
+            return 0.0
+
+        best_start = 0
+        best_avg = float("-inf")
+
+        # Convert RMS dB to linear (higher = louder)
+        # RMS is negative dB, more negative = quieter
+        for i in range(len(rms_values) - window_samples + 1):
+            window = rms_values[i:i + window_samples]
+            # Filter out -inf values
+            valid = [v for v in window if v != float("-inf")]
+            if not valid:
+                continue
+            avg = sum(valid) / len(valid)
+            if avg > best_avg:
+                best_avg = avg
+                best_start = i
+
+        return float(best_start)
+
+    except Exception:
+        return max(0.0, (duration - window_sec) / 2)
+
+
+def _extract_audio_segment(mp3_path, output_path, start_sec, duration_sec):
+    """Extract a segment of an MP3 file using FFmpeg."""
+    cmd = [
+        _FFMPEG, "-y",
+        "-ss", str(start_sec),
+        "-i", mp3_path,
+        "-t", str(duration_sec),
+        "-c", "copy",
+        output_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    proc.check_returncode()
+    return output_path
+
+
+def _generate_chorus_srt(lyrics, duration_sec=45):
+    """Generate SRT subtitle content from lyrics for a short video.
+
+    Parses lyrics into lines, selects the most relevant portion (chorus or
+    middle section), and distributes them evenly across the duration.
+
+    Args:
+        lyrics: Full lyrics text
+        duration_sec: Duration in seconds to fill
+
+    Returns:
+        SRT-formatted string, or empty string if no suitable lyrics found
+    """
+    # Parse into lines: skip empty lines and section markers like [Verse]
+    lines = [
+        l.strip() for l in lyrics.split("\n")
+        if l.strip() and not l.strip().startswith("[")
+    ]
+    if not lines:
+        return ""
+
+    # Select chorus portion: use middle section for the short
+    if len(lines) > 8:
+        # Take 4-6 lines from the middle or chorus section
+        chorus_start = len(lines) // 3
+        chorus_lines = lines[chorus_start:chorus_start + 6]
+    else:
+        chorus_lines = lines[:4]
+
+    # Filter out any lines that are too short or look like metadata
+    chorus_lines = [l for l in chorus_lines if len(l) > 2]
+
+    if not chorus_lines:
+        return ""
+
+    # Distribute evenly across the duration
+    num_lines = len(chorus_lines)
+    duration_per_line = max(3.0, duration_sec / num_lines)
+
+    srt_parts = []
+    for i, line in enumerate(chorus_lines):
+        start = i * duration_per_line
+        end = min((i + 1) * duration_per_line, duration_sec)
+        # Only include if there's enough time to display
+        if end - start >= 1.5:
+            srt_parts.append(str(i + 1))
+            srt_parts.append(
+                f"{_format_srt_time(start)} --> {_format_srt_time(end)}"
+            )
+            srt_parts.append(line)
+            srt_parts.append("")
+
+    return "\n".join(srt_parts)
+
+
+def _format_srt_time(seconds):
+    """Format seconds to SRT timestamp: HH:MM:SS,mmm."""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds - int(seconds)) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _ensure_script_dir_on_path():
+    """Ensure the scripts directory is on sys.path for imports."""
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    if _script_dir not in sys.path:
+        sys.path.insert(0, _script_dir)
+
+
+def _sanitize_for_filename(text):
+    """Sanitize text for use in filenames."""
+    text = re.sub(r"[:/\\|]", "-", text)
+    text = re.sub(r"['\"<>]", "", text)
+    text = re.sub(r"\s+", "_", text)
+    text = re.sub(r"-+", "-", text)
+    return text.strip(".-_ ").lower()[:60]
+
+
+def _safe_generate_prompt(title, lyrics, style_tags, orientation):
+    """Safely call prompt_gen.generate_prompt_from_lyrics, returning None on failure."""
+    if _prompt_gen_module is None:
+        print("[nightly:visualizer] prompt_gen module not available", file=sys.stderr)
+        return None
+    try:
+        return _prompt_gen_module.generate_prompt_from_lyrics(
+            title, lyrics, style_tags, orientation
+        )
+    except Exception as e:
+        print(f"[nightly:visualizer] prompt_gen failed: {e}", file=sys.stderr)
+        return None
 
 
 # ---------------------------------------------------------------------------
