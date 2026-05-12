@@ -1,9 +1,11 @@
 # Hermes Agent Execution Plan: Nightly AI Music — 10-Song Upgrade
 
+> **STALE — Superseded pre-implementation plan.** This document was the original Phase 2 plan for a 10-song upgrade (2026-05-08). The project took a different direction: Phase 1 shipped with 2 songs/night, YouTube visualizer + uploader, and consolidated project layout. See [README.md](README.md) for current state.
+
 > **Project:** nightly-ai-music-youtube
 > **Boss:** Dennis Ng
 > **Date:** 2026-05-08
-> **Status:** Planning
+> **Status:** Superseded — see README.md for current
 
 ---
 

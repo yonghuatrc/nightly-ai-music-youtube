@@ -1,7 +1,7 @@
 # Execution Plan: Nightly AI Music YouTube Channel
 
-Date: 2026-05-12
-Status: Phase 1a complete → Phase 1b ready
+Date: 2026-05-12 (updated 2026-05-12)
+Status: ✅ Phase 1 complete — pipeline runs nightly at 2am SGT
 
 ---
 
@@ -72,9 +72,10 @@ All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup 
 | Phase | Status | Date Completed |
 |-------|--------|----------------|
 | Phase 1a — Bug fixes | ✅ Complete | 2026-05-12 |
-| Phase 1b — Prerequisites | ⬜ Pending | — |
-| Phase 1b — Implementation | ⬜ Pending | — |
-| Phase 1b — DRY RUN | ⬜ Pending | — |
+| Phase 1b — Prerequisites | ✅ Complete | 2026-05-12 |
+| Phase 1b — Implementation | ✅ Complete | 2026-05-12 |
+| Phase 1b — DRY RUN | ✅ Complete | 2026-05-12 |
+| Phase 1b — YouTube Upload | ✅ Complete | 2026-05-12 |
 | Phase 2 — Multi-agent | ⬜ Deferred | — |
 
 ---
@@ -83,13 +84,18 @@ All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup 
 
 | File | Location |
 |------|----------|
-| Design document | `D:\Hermes\pending-projects\nightly-ai-music-youtube\DESIGN.md` |
-| Execution plan | `D:\Hermes\pending-projects\nightly-ai-music-youtube\EXECUTION_PLAN.md` (this file) |
-| Original Phase 1 spec | `D:\Hermes\pending-projects\nightly-ai-music-youtube\Project_Instruction.md` |
-| AGENT_EXECUTION_PLAN.md | `D:\Hermes\pending-projects\nightly-ai-music-youtube\AGENT_EXECUTION_PLAN.md` |
-| Phase 2 issues | `D:\Hermes\pending-projects\nightly-ai-music-youtube\Phase2_Issues.md` |
-| Pipeline script | `~/.hermes/scripts/nightly_music.py` |
-| API wrapper | `~/.hermes/scripts/minimax_music_api.py` |
-| Trending fetcher | `~/.hermes/scripts/fetch_trending.py` |
-| Config | `/mnt/d/Hermes/config/nightly-music.yaml` |
-| Song log | `~/.hermes/work_logs/nightly-songs/song-log*.json` |
+| Design document | `DESIGN.md` |
+| Execution plan | `EXECUTION_PLAN.md` (this file) |
+| Original Phase 1 spec | `Project_Instruction.md` |
+| AGENT_EXECUTION_PLAN.md | `AGENT_EXECUTION_PLAN.md` |
+| Phase 2 issues | `Phase2_Issues.md` |
+| Pipeline script | `scripts/nightly_music.py` |
+| API wrapper | `scripts/minimax_music_api.py` |
+| Trending fetcher | `scripts/fetch_trending.py` |
+| Dedup checker | `scripts/check-duplicate.py` |
+| Visualizer | `scripts/nightly_visualizer.py` |
+| YouTube uploader | `scripts/nightly_uploader.py` |
+| Config | `config/nightly-music.yaml` |
+| Output | `output/YYYY-MM-DD/` |
+| Song log | `output/YYYY-MM-DD/..` (JSON logs in output dir) |
+| Cron log | `logs/nightly_music.log` |

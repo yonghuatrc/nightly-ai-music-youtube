@@ -1,11 +1,13 @@
 # Project: Nightly AI Music — YouTube Channel
 
+> **Note:** This is the original Phase 1 specification document created on 2026-05-05. Phase 1 is now **complete** — the pipeline runs nightly at 2am SGT with YouTube upload and visualizer. See [README.md](README.md) for current state and [EXECUTION_PLAN.md](EXECUTION_PLAN.md) for completion tracking.
+
 ## Overview
 
 Every night at 2am, generate 2 AI songs (trending SG/MY style across EN/ZH/KR/JP languages), deliver 9am Telegram notification with lyrics + audio files. Goal: populate a YouTube channel showcasing that AI-generated music can be high quality. 1-week trial run first.
 
 **Owner:** Dennis Ng
-**Status:** Planning
+**Status:** ✅ Phase 1 complete (this doc is the original spec snapshot)
 **Created:** 2026-05-05
 **Trial:** 2026-05-06 to 2026-05-13 (7 nights)
 
