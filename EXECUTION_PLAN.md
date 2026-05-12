@@ -33,10 +33,10 @@ All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup 
 | P1 | Create Google Cloud Project | Go to https://console.cloud.google.com |
 | P2 | Enable YouTube Data API v3 | APIs & Services → Enable API |
 | P3 | Configure OAuth consent screen | External, test user, add your email |
-| P4 | Create OAuth 2.0 Desktop credentials | Download JSON → save to `~/.hermes/secrets/youtube-oauth.json` |
+| P4 | Create OAuth 2.0 Desktop credentials | Download JSON → save to `/mnt/d/Hermes/secrets/youtube-oauth.json` |
 | P5 | Install Python deps | `pip install google-auth google-auth-oauthlib google-api-python-client` |
 | P6 | Install CJK font (if missing) | `sudo apt install fonts-noto-cjk` |
-| P7 | Prepare 5-10 background images | Download from Unsplash/Pexels → `~/.hermes/songs/assets/backgrounds/` |
+| P7 | Prepare 5-10 background images | Download from Unsplash/Pexels → `assets/backgrounds/` |
 | P8 | Run one-time OAuth consent | `python nightly_uploader.py --auth` opens browser, click Allow |
 
 ### Implementation
@@ -86,7 +86,7 @@ Preserved from the original `Project_Instruction.md` specification. These define
 
 ### Log Format
 
-**File:** `~/.hermes/work_logs/nightly-songs/song-log.json` (monthly rotation: `song-log-YYYY-MM.json`)
+**File:** `logs/song-log-YYYY-MM.json` (project-relative, monthly rotation)
 
 ```json
 {
@@ -98,7 +98,7 @@ Preserved from the original `Project_Instruction.md` specification. These define
   "style_reference": "仿林俊杰 抒情R&B 风格",
   "prompt_used": "...",
   "model": "MiniMax-Music",
-  "output_file": "/home/dennis/.hermes/nightly-songs/2026-05-05-song-1.mp3",
+  "output_file": "output/2026-05-05/01-song.mp3",
   "lyrics": "..."
 }
 ```

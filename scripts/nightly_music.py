@@ -9,7 +9,7 @@ Features:
   - Generates songs sequentially via MiniMax API
   - Creates per-day subfolders (YYYY-MM-DD/)
   - Batches Telegram delivery (5 songs per message)
-  - Syncs to D-drive mirror
+  - Syncs to output directory (with Windows mirror at /mnt/d/Hermes/)
 
 Usage:
     python3 nightly_music.py --date 2026-05-09

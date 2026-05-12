@@ -27,7 +27,7 @@ nightly_music.py --date YYYY-MM-DD
   ├── 3. Generate 2 songs via MiniMax Music API
   ├── 4. Generate MP4 visualizer (FFmpeg waveform + album art)
   ├── 5. Upload to YouTube (scheduled for 6pm SGT)
-  ├── 6. Sync to D-drive mirror
+  ├── 6. Sync to output/ directory
   └── 7. Send Telegram batch (summary + links + files)
 ```
 
