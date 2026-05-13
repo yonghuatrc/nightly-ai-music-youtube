@@ -57,6 +57,14 @@ youtube:
     - "MiniMax"
     - "华语新歌推荐"
 
+# Song quality gate — scores each song and filters weak ones
+# When enabled, only hero + standard songs get uploaded.
+# When disabled, all songs pass through (old behavior).
+quality_gate:
+  enabled: true
+  hero_threshold: 6.0
+  standard_threshold: 4.0
+
 # Visualizer settings
 visualizer:
   enabled: true

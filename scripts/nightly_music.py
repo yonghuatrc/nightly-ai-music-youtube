@@ -45,6 +45,7 @@ ASSETS_DIR = os.path.join(PROJECT_DIR, "assets", "backgrounds")
 sys.path.insert(0, SCRIPTS_DIR)
 sys.path.insert(0, "/home/dennis/.hermes/venv/lib/python3.12/site-packages")
 from minimax_music_api import generate_and_save
+from song_quality import score_song_quality
 
 # Optional imports — visualizer and YouTube uploader (graceful fallback)
 try:
@@ -391,17 +392,28 @@ def send_telegram_batch(songs_batch, batch_num, total_batches, date_label):
     lines.append("")
 
     for s in songs_batch:
-        status_icon = "✅" if s["status"] == "success" else "❌"
+        # Quality-aware status icon
+        if s.get("quality_verdict") == "hero":
+            status_icon = "🏆"
+        elif s.get("quality_verdict") == "reject":
+            status_icon = "⛔"
+        elif s["status"] == "success":
+            status_icon = "\u2705"
+        else:
+            status_icon = "\u274C"
         title_display = s.get("title", "Unknown")
         duration = s.get("duration_sec", 0)
         duration_str = f"{int(duration//60)}:{int(duration%60):02d}" if duration else "--:--"
         prompt_short = s.get("prompt", "")[:40]
-        lines.append(f"{status_icon} Song #{s['song_number']}: {title_display}")
+        quality_tag = ""
+        if s.get("quality_verdict") and s.get("quality_score") is not None:
+            quality_tag = f" [{s['quality_score']}/10 {s['quality_verdict']}]"
+        lines.append(f"{status_icon} Song #{s['song_number']}: {title_display}{quality_tag}")
         lines.append(f"   {duration_str} · {prompt_short}")
         if s["status"] == "failed":
-            lines.append(f"   ⚠️ Failed: {s.get('error', 'unknown')}")
+            lines.append(f"   ⚠ Failed: {s.get('error', 'unknown')}")
         if s.get("youtube_url"):
-            lines.append(f"   🔗 {s['youtube_url']}")
+            lines.append(f"   \U0001F517 {s['youtube_url']}")
 
     caption = "\n".join(lines)
 
@@ -817,12 +829,67 @@ def run_pipeline(date_str, dry_run=False):
         successes = sum(1 for r in song_results if r["status"] == "success")
         print(f"[nightly] Progress: {successes}/{len(song_results)} successful\n")
 
+    # Step 3.5: Quality gate
+    quality_gate_cfg = config.get("quality_gate", {})
+    quality_enabled = quality_gate_cfg.get("enabled", True)
+    hero_threshold = quality_gate_cfg.get("hero_threshold", 6.0)
+    standard_threshold = quality_gate_cfg.get("standard_threshold", 4.0)
+
+    if quality_enabled:
+        print(f"\n[nightly] {'─'*50}")
+        print(f"[nightly] Quality Gate — thresholds: hero >= {hero_threshold}, standard >= {standard_threshold}")
+        print(f"[nightly] {'─'*50}")
+
+        for song in song_results:
+            if song["status"] == "success":
+                q = score_song_quality(
+                    song,
+                    hero_threshold=hero_threshold,
+                    standard_threshold=standard_threshold,
+                )
+                song["quality_score"] = q["total_score"]
+                song["quality_verdict"] = q["verdict"]
+                song["quality_breakdown"] = q["breakdown"]
+
+                verdict_icon = {"hero": "🏆", "standard": "✅", "reject": "❌"}.get(q["verdict"], "❓")
+                print(f"[nightly]   Song #{song['song_number']}: {song['title'][:40]}")
+                print(f"[nightly]     {verdict_icon} Score: {q['total_score']}/10  Verdict: {q['verdict']}")
+                print(f"[nightly]     Breakdown: lyrics={q['breakdown']['lyrics_length']} "
+                      f"chorus={q['breakdown']['has_chorus']} "
+                      f"duration={q['breakdown']['duration']} "
+                      f"placeholder={q['breakdown']['placeholder_check']} "
+                      f"vocab={q['breakdown']['vocabulary_richness']}")
+            else:
+                song["quality_score"] = 0.0
+                song["quality_verdict"] = "reject"
+                song["quality_breakdown"] = {}
+                print(f"[nightly]   Song #{song['song_number']}: FAILED \u2192 reject (no quality scoring)")
+
+        hero_count = sum(1 for s in song_results if s.get("quality_verdict") == "hero")
+        standard_count = sum(1 for s in song_results if s.get("quality_verdict") == "standard")
+        rejected_count = sum(1 for s in song_results if s.get("quality_verdict") == "reject")
+        print(f"[nightly] Gate result: {hero_count} hero, {standard_count} standard, {rejected_count} rejected")
+
+        if dry_run:
+            print(f"[nightly] [DRY RUN] Scoring complete \u2014 quality gate does not filter in dry-run mode")
+        print(f"[nightly] {'─'*50}\n")
+    else:
+        print(f"[nightly] Quality gate disabled \u2014 all songs pass through (old behavior)")
+        for song in song_results:
+            if song["status"] == "success":
+                song["quality_score"] = 5.0
+                song["quality_verdict"] = "standard"
+            else:
+                song["quality_score"] = 0.0
+                song["quality_verdict"] = "reject"
+
     # Step 4: Generate visualizers
     visualizer_enabled = config.get("visualizer", {}).get("enabled", True)
     visualizer_results = []
     if visualizer_enabled:
         for song in song_results:
-            if song["status"] == "success":
+            is_rejected_viz = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
+            if song["status"] == "success" and not is_rejected_viz:
                 title = song["title"]
                 safe_viz = sanitize_filename(title)
                 mp4_path = os.path.join(songs_dir, f"{song['song_number']:02d}-{safe_viz}-viz.mp4")
@@ -875,6 +942,10 @@ def run_pipeline(date_str, dry_run=False):
                         print(f"[nightly] Thumbnail generated: {os.path.basename(thumbnail_path)}")
                 else:
                     song["thumbnail_path"] = ""
+            elif is_rejected_viz:
+                song["mp4_path"] = ""
+                song["visualizer_status"] = "skipped"
+                print(f"[nightly] Visualizer skipped for #{song['song_number']} ({song.get('quality_verdict', 'reject')})")
             else:
                 song["mp4_path"] = ""
                 song["visualizer_status"] = "skipped"
@@ -889,11 +960,14 @@ def run_pipeline(date_str, dry_run=False):
     shorts_enabled = shorts_cfg.get("enabled", True)
     if shorts_enabled:
         for song in song_results:
-            if song["status"] != "success":
+            is_rejected_short = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
+            if song["status"] != "success" or is_rejected_short:
                 song["bg_path"] = ""
                 song["bg_vertical_path"] = ""
                 song["short_path"] = ""
                 song["short_status"] = "skipped"
+                if is_rejected_short:
+                    print(f"[nightly] Shorts skipped for #{song['song_number']} ({song.get('quality_verdict', 'reject')})")
                 continue
 
             title = song["title"]
@@ -965,7 +1039,10 @@ def run_pipeline(date_str, dry_run=False):
     youtube_results = []
     if youtube_enabled:
         for song in song_results:
-            if song["status"] == "success" and song.get("visualizer_status") == "ok":
+            is_rejected_yt = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
+            if (song["status"] == "success"
+                    and song.get("visualizer_status") == "ok"
+                    and not is_rejected_yt):
                 if dry_run:
                     upload_result = {
                         "video_id": f"DRY-RUN-{song['song_number']:02d}",
@@ -975,9 +1052,15 @@ def run_pipeline(date_str, dry_run=False):
                     }
                     print(f"[nightly] [DRY RUN] Would upload: {song['title'][:50]}")
                 else:
-                    # Phase 2: Staggered upload — Hero at 18:00, Standard at 20:00
-                    song_num = song.get("song_number", 1)
-                    publish_hour = 18 if song_num == 1 else 20
+                    # Phase 2: Quality verdict-based staggered scheduling
+                    # Hero → 18:00 SGT, Standard → 20:00 SGT
+                    verdict = song.get("quality_verdict", "standard")
+                    if verdict == "hero":
+                        publish_hour = 18
+                    elif verdict == "standard":
+                        publish_hour = 20
+                    else:
+                        publish_hour = 18  # fallback
                     upload_result = upload_to_youtube(
                         video_path=song["mp4_path"],
                         title=song["title"],
@@ -991,6 +1074,11 @@ def run_pipeline(date_str, dry_run=False):
                 song["youtube_url"] = upload_result.get("url", upload_result.get("youtube_url", ""))
                 song["youtube_status"] = upload_result.get("status", "failed")
                 youtube_results.append(upload_result)
+            elif is_rejected_yt:
+                song["youtube_video_id"] = ""
+                song["youtube_url"] = ""
+                song["youtube_status"] = "rejected"
+                print(f"[nightly] YouTube upload skipped for #{song['song_number']} ({song['title'][:40]} — rejected by quality gate)")
             else:
                 song["youtube_video_id"] = ""
                 song["youtube_url"] = ""
@@ -1005,9 +1093,11 @@ def run_pipeline(date_str, dry_run=False):
     # Step 5.5: Upload Shorts to YouTube
     if shorts_enabled:
         for song in song_results:
+            is_rejected_short_upload = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
             if (song["status"] == "success"
                     and song.get("short_status") == "ok"
-                    and os.path.exists(song.get("short_path", ""))):
+                    and os.path.exists(song.get("short_path", ""))
+                    and not is_rejected_short_upload):
                 if dry_run:
                     print(f"[nightly] [DRY RUN] Would upload Short: {song['title'][:50]}")
                     song["short_youtube_id"] = f"DRY-RUN-SHORT-{song['song_number']:02d}"
@@ -1025,6 +1115,11 @@ def run_pipeline(date_str, dry_run=False):
                     song["short_youtube_id"] = upload_result.get("video_id", "")
                     song["short_youtube_url"] = upload_result.get("url", upload_result.get("youtube_url", ""))
                     song["short_upload_status"] = upload_result.get("status", "failed")
+            elif is_rejected_short_upload:
+                song["short_youtube_id"] = ""
+                song["short_youtube_url"] = ""
+                song["short_upload_status"] = "rejected"
+                print(f"[nightly] Shorts upload skipped for #{song['song_number']} ({song['title'][:40]} — rejected by quality gate)")
             else:
                 song["short_youtube_id"] = ""
                 song["short_youtube_url"] = ""
@@ -1058,6 +1153,9 @@ def run_pipeline(date_str, dry_run=False):
             "daily_folder": date_label,
             "duration_sec": r.get("duration_sec", 0),
             "size_mb": r.get("size_mb", 0),
+            "quality_score": r.get("quality_score"),
+            "quality_verdict": r.get("quality_verdict"),
+            "quality_breakdown": r.get("quality_breakdown"),
             "mp4_path": r.get("mp4_path", ""),
             "visualizer_status": r.get("visualizer_status", ""),
             "bg_path": r.get("bg_path", ""),
