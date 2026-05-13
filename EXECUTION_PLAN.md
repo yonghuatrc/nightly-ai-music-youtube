@@ -1,7 +1,7 @@
 # Execution Plan: Nightly AI Music YouTube Channel
 
-Date: 2026-05-12 (updated 2026-05-12)
-Status: ✅ Phase 1 complete — pipeline runs nightly at 2am SGT
+Date: 2026-05-14 (updated 2026-05-14)
+Status: ✅ Phase 1 + Phase 2 complete — quality-gated pipeline runs nightly at 2am SGT
 
 ---
 
@@ -54,16 +54,49 @@ All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup 
 
 ---
 
-## Phase 2: Multi-Agent Architecture (deferred)
+## Phase 2: Quality-Gated Pipeline — ✅ COMPLETE (2026-05-14)
 
-| Feature | Description |
-|---------|-------------|
-| Multi-agent coordinator | Cron trigger → orchestrates gen → viz → distro → growth flow |
-| Animated visualizers | moviepy/manim with particle effects, karaoke lyrics |
-| 10 songs configurable | Trending chart integration (QQ Music, NetEase, Kugou) |
-| YouTube Shorts | Auto-clip top 3 songs → 60s vertical format |
-| Growth agent | Cross-posting (Twitter, Bilibili), analytics + strategy |
-| Async generation | Parallel MiniMax API calls for 10 songs |
+Phase 2 replaces the old "10 songs/day, multi-agent" plan with a quality-gated strategy: 0-2 songs/day, Hero/Standard tiers, mood-based visualizer colors, SRT subtitles, staggered upload, weekly themes, and Sunday compilation.
+
+### New Modules Created
+
+| Module | File | Purpose |
+|--------|------|---------|
+| Song quality scoring | `scripts/song_quality.py` | Score on 5 dimensions (0-10); Hero ≥6, Standard ≥4, reject |
+| Weekly themes | `scripts/weekly_themes.py` | Day-of-week mood modifiers (Mon-Sun) |
+| Weekly compilation | `scripts/nightly_compilation.py` | Sunday FFmpeg concat album from Mon-Sat Heroes |
+| Prompt generation | `scripts/prompt_gen.py` | LLM-based image prompt from song lyrics via MiniMax |
+| Image generation | `scripts/image_gen.py` | Pollinations.ai rate-limited image download |
+
+### Behavior Changes
+
+| Feature | Phase 1 | Phase 2 |
+|---------|---------|---------|
+| Song quality | No gate — upload everything | Hero ≥6/10, Standard ≥4/10, skip <4 |
+| Upload times | Both at 18:00 | Hero at 18:00, Standard at 20:00, Shorts at 12:00 |
+| Shorts duration | 45s | 30s (higher retention) |
+| Long-form SRT | ❌ Not on long video | ✅ SRT subtitle overlay on long-form |
+| Visualizer colors | Static `#FF6B6B\|#4ECDC4` | Dynamic mood-based (7 palettes) |
+| Weekly themes | None | Day-of-week mood modifiers |
+| Weekly compilation | None | Sunday album from week's videos |
+| Background images | Static default-dark.jpg | Per-song Pollinations.ai generated |
+
+### Sprint Breakdown
+
+| Sprint | Deliverables | Status |
+|--------|-------------|--------|
+| **Sprint 1** | `song_quality.py` — 5-dim scoring (lyrics_length, has_chorus, duration, placeholder_check, vocabulary_richness). Verdict: Hero ≥6 (premium), Standard ≥4, reject <4. Mood detection → 7 color palettes from lyrics. SRT overlay on long-form via FFmpeg `subtitles=` filter. Staggered upload schedule (Hero 18:00, Standard 20:00). Shorts duration 45s→30s. | ✅ Complete |
+| **Sprint 2** | `image_gen.py` — Pollinations.ai wrapper with rate limiting (15s delay). `prompt_gen.py` — MiniMax M2.7 LLM prompt generation + Pollinations fallback + rule-based last resort. Channel branding assets (logo 800x800, banner 2560x1440). Per-song backgrounds + thumbnails via Pollinations. | ✅ Complete |
+| **Sprint 3** | `weekly_themes.py` — 7 day-of-week themes (Mon=upbeat, Tue=melancholy, Wed=romantic, Thu=sad, Fri=energetic, Sat=chill, Sun=calm). Theme injected into MiniMax song prompt. Config toggle in `nightly-music.yaml`. | ✅ Complete |
+| **Sprint 4** | `nightly_compilation.py` — Sunday-only FFmpeg concat of Mon-Sat Hero videos. Chapter markers, ~30-45 min album. Bug fixes: B1 (visualizer runs after asset gen), B2 (background=None crash), B3 (thumbnail double-gen). E2E regression pass. | ✅ Complete |
+
+### Fixed Bugs (Phase 2 QA)
+
+| # | Bug | File | Fix |
+|---|-----|------|-----|
+| B1 | Visualizer runs before assets exist | `nightly_music.py` | Reordered: assets→thumbnail→visualizer |
+| B2 | `generate_background()` returns None | `image_gen.py` | Added fallback to default background |
+| B3 | Thumbnail generated twice | `nightly_music.py` | Removed duplicate call in visualizer step |
 
 ---
 
@@ -76,7 +109,10 @@ All 10 bugs fixed across 3 files. Verified: compile clean, dry-run works, dedup 
 | Phase 1b — Implementation | ✅ Complete | 2026-05-12 |
 | Phase 1b — DRY RUN | ✅ Complete | 2026-05-12 |
 | Phase 1b — YouTube Upload | ✅ Complete | 2026-05-12 |
-| Phase 2 — Multi-agent | ⬜ Deferred | — |
+| Phase 2 — Sprint 1 (Quality, Mood, SRT) | ✅ Complete | 2026-05-14 |
+| Phase 2 — Sprint 2 (Image Gen, Branding) | ✅ Complete | 2026-05-14 |
+| Phase 2 — Sprint 3 (Weekly Themes) | ✅ Complete | 2026-05-14 |
+| Phase 2 — Sprint 4 (Compilation, Bugfixes) | ✅ Complete | 2026-05-14 |
 
 ---
 
@@ -152,13 +188,23 @@ Preserved from the original `Project_Instruction.md` specification. These define
 |------|----------|
 | Design document | `DESIGN.md` |
 | Execution plan | `EXECUTION_PLAN.md` (this file) |
+| Phase 2 issues | `Phase2_Issues.md` |
+| Phase 2 architecture | `Phase2_ARCHITECTURE.md` |
+| Pipeline workflow spec | `WORKFLOW-pipeline-phase2.md` |
 | Pipeline script | `scripts/nightly_music.py` |
 | API wrapper | `scripts/minimax_music_api.py` |
 | Trending fetcher | `scripts/fetch_trending.py` |
 | Dedup checker | `scripts/check-duplicate.py` |
 | Visualizer | `scripts/nightly_visualizer.py` |
 | YouTube uploader | `scripts/nightly_uploader.py` |
+| **Song quality** | **`scripts/song_quality.py`** (Phase 2) |
+| **Weekly themes** | **`scripts/weekly_themes.py`** (Phase 2) |
+| **Weekly compilation** | **`scripts/nightly_compilation.py`** (Phase 2) |
+| **Prompt generation** | **`scripts/prompt_gen.py`** (Phase 2) |
+| **Image generation** | **`scripts/image_gen.py`** (Phase 2) |
 | Config | `config/nightly-music.yaml` |
+| Growth strategy | `docs/GROWTH_STRATEGY.md` |
+| Channel about | `docs/CHANNEL_ABOUT.md` |
 | Output | `output/YYYY-MM-DD/` |
 | Song log | `output/YYYY-MM-DD/..` (JSON logs in output dir) |
 | Cron log | `logs/nightly_music.log` |

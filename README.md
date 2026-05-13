@@ -2,7 +2,7 @@
 
 > AI-generated music that's actually good — uploaded daily to YouTube with visualizers. Full pipeline: trending fetch → dedup → MiniMax music gen → FFmpeg visualizer → YouTube upload → Telegram delivery.
 
-**Status:** Phase 1 complete, running nightly  
+**Status:** Phase 2 complete — quality-gated pipeline running nightly  
 **Schedule:** 2am SGT daily via crontab  
 **First videos:** [晴天风格](https://www.youtube.com/watch?v=2plnyTSExQE) · [我只能离开风格](https://www.youtube.com/shorts/niijYd3WZk8)
 
@@ -24,11 +24,29 @@ nightly_music.py --date YYYY-MM-DD
   │
   ├── 1. Fetch trending Chinese songs (QQ Music, KKBOX, MY FM)
   ├── 2. Dedup against last 7 days (check-duplicate.py)
-  ├── 3. Generate 2 songs via MiniMax Music API
-  ├── 4. Generate MP4 visualizer (FFmpeg waveform + album art)
-  ├── 5. Upload to YouTube (scheduled for 6pm SGT)
-  ├── 6. Sync to output/ directory
-  └── 7. Send Telegram batch (summary + links + files)
+  ├── 3. Apply weekly theme modifier (weekly_themes.py)             ← Phase 2
+  ├── 4. Generate 2 songs via MiniMax Music API
+  ├── 5. Score song quality (song_quality.py)                        ← Phase 2
+  │      ├── Hero ≥ 6   → full treatment
+  │      ├── Standard ≥ 4 → basic treatment
+  │      └── Reject < 4 → dropped
+  ├── 6. Generate image prompt from lyrics (prompt_gen.py)           ← Phase 2
+  ├── 7. Download background image (image_gen.py)                    ← Phase 2
+  ├── 8. Detect mood → color palette (7 themes)                     ← Phase 2
+  ├── 9. Generate MP4 visualizer (FFmpeg waveform + mood colors)
+  │      └── SRT subtitle overlay on long-form                      ← Phase 2
+  ├── 10. Generate YouTube Shorts (30s, 9:16)                       ← Phase 2
+  ├── 11. Upload to YouTube (staggered schedule)
+  │       ├── Hero → 18:00 SGT
+  │       ├── Standard → 20:00 SGT
+  │       └── Shorts → 12:00 SGT
+  ├── 12. Sync to output/ directory
+  └── 13. Send Telegram batch (summary + links + files)
+       │
+       ▼
+  SUNDAY ONLY: nightly_compilation.py                               ← Phase 2
+       │
+       └── FFmpeg concat Mon-Sat Hero videos → album upload
 ```
 
 ---
@@ -39,18 +57,26 @@ nightly_music.py --date YYYY-MM-DD
 nightly-ai-music-youtube/
 ├── scripts/
 │   ├── nightly_music.py          # Pipeline orchestrator
-│   ├── nightly_visualizer.py     # FFmpeg waveform MP4 generator
+│   ├── nightly_visualizer.py     # FFmpeg waveform MP4 generator + SRT
 │   ├── nightly_uploader.py       # YouTube Data API v3 uploader
+│   ├── nightly_compilation.py    # Weekly album concat (Sunday)     ← P2
 │   ├── minimax_music_api.py      # MiniMax Music API wrapper
 │   ├── fetch_trending.py         # Multi-source trending song fetcher
-│   └── check-duplicate.py        # 7-day dedup checker
+│   ├── check-duplicate.py        # 7-day dedup checker
+│   ├── song_quality.py           # 5-dimension quality scoring       ← P2
+│   ├── weekly_themes.py          # Day-of-week mood modifiers        ← P2
+│   ├── prompt_gen.py             # LLM-based image prompt gen        ← P2
+│   └── image_gen.py              # Pollinations.ai image download    ← P2
 ├── config/
-│   └── nightly-music.yaml        # Song count, language, YouTube, visualizer settings
+│   └── nightly-music.yaml        # Quality gate, shorts, themes, compilation
 ├── assets/
-│   └── backgrounds/              # Visualizer background images
+│   ├── backgrounds/              # Visualizer background images
+│   └── branding/                 # Channel logo + banner             ← P2
 ├── output/
-│   └── YYYY-MM-DD/               # Per-night output (MP3, TXT, MP4)
-├── docs/                         # Design docs, execution plans, issues
+│   └── YYYY-MM-DD/               # Per-night output (MP3, TXT, MP4, SRT, Shorts)
+├── docs/                         # Design docs, growth strategy, issues
+│   ├── GROWTH_STRATEGY.md        # 500-sub growth plan               ← P2
+│   └── CHANNEL_ABOUT.md          # YouTube About section             ← P2
 ├── logs/                         # Pipeline run logs
 ├── .env.example                  # Environment variable template
 └── .gitignore
@@ -69,8 +95,18 @@ Edit `config/nightly-music.yaml` to change behavior — no code changes needed:
 | `trending_source` | `["qq-douyin", "kkbox", "my-fm"]` | Sources tried in order, deduplicated |
 | `youtube.enabled` | `true` | Enable YouTube upload |
 | `youtube.privacy` | `"private"` | `"private"`, `"unlisted"`, or `"public"` |
+| `quality_gate.enabled` | `true` | Score songs and filter weak ones (Phase 2) |
+| `quality_gate.hero_threshold` | `6.0` | Score for premium treatment (Phase 2) |
+| `quality_gate.standard_threshold` | `4.0` | Score for basic treatment (Phase 2) |
 | `visualizer.enabled` | `true` | Enable FFmpeg visualizer |
 | `visualizer.resolution` | `"1920x1080"` | Output resolution |
+| `visualizer.lyrics_overlay` | `true` | Burn SRT subtitles into long-form (Phase 2) |
+| `visualizer.mood_colors` | `true` | Dynamic mood-based palette (Phase 2) |
+| `shorts.enabled` | `true` | Generate YouTube Shorts (Phase 2) |
+| `shorts.duration_sec` | `30` | Shorts length in seconds (Phase 2) |
+| `shorts.upload_time` | `"12:00"` | Shorts scheduled publish time (Phase 2) |
+| `weekly_themes.enabled` | `true` | Day-of-week mood modifiers (Phase 2) |
+| `compilation.enabled` | `true` | Sunday album concat (Phase 2) |
 | `telegram.songs_per_message` | `5` | Songs per Telegram batch |
 
 ---
@@ -116,23 +152,35 @@ All secrets live outside the repo:
 
 ## YouTube Channel
 
-- **Videos:** [AI Music — 周杰伦 晴天风格](https://www.youtube.com/watch?v=2plnyTSExQE)
-- **Shorts:** [我只能离开风格 (Short)](https://www.youtube.com/shorts/niijYd3WZk8)
-- Uploads scheduled for 6pm SGT (peak viewing hours)
+- **Channel:** [ManggoMusicCH](https://www.youtube.com/@ManggoMusicCH)
+- **Long-form videos:** Quality-gated Hero (18:00 SGT) + Standard (20:00 SGT)
+- **Shorts (30s):** Clipped from chorus section, uploaded at 12:00 SGT
+- **Weekly compilation (Sunday):** Album-style concat of Mon-Sat Hero videos
 - Privacy: currently set to private during testing
+- See [docs/CHANNEL_ABOUT.md](docs/CHANNEL_ABOUT.md) for channel branding setup
 
 ---
 
-## Phase 2 Roadmap
+## Phase 2 — Complete (2026-05-14)
 
-| Feature | Description |
-|---------|-------------|
-| Multi-agent coordinator | Cron trigger → orchestrates gen → viz → distro → growth |
-| Animated visualizers | moviepy/manim with particle effects, karaoke lyrics |
-| 10 songs configurable | Scale up via trending chart integration |
-| YouTube Shorts | Auto-clip top songs → 60s vertical format |
-| Growth agent | Cross-posting (Twitter, Bilibili), analytics + strategy |
-| Async generation | Parallel MiniMax API calls for N songs |
+All Phase 2 features are shipped. The old "10 songs/day, multi-agent" plan was replaced with a quality-gated strategy.
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Quality gating | Score 0-10 on 5 dimensions. Hero ≥6, Standard ≥4, reject <4 | ✅ |
+| Mood-based colors | 7 mood palettes from lyrics keywords (LLM + rule-based) | ✅ |
+| SRT on long-form | Full-song timed subtitles via FFmpeg `subtitles=` filter | ✅ |
+| Staggered schedule | Hero 18:00, Standard 20:00, Shorts 12:00 | ✅ |
+| Shorts 30s | Clipped from chorus, 9:16 vertical | ✅ |
+| Weekly themes | Day-of-week mood modifiers in prompts | ✅ |
+| Weekly compilation | Sunday FFmpeg concat → album upload | ✅ |
+| E2E testing + tuning | Calibrated thresholds, fixed B1-B3 ordering bugs | ✅ |
+
+### What's Next
+
+- Monitor quality gate calibration after 7+ days of scoring data
+- Review subscriber growth against 500-target trajectory
+- Tune mood detection accuracy from real song feedback
 
 ---
 
@@ -141,7 +189,10 @@ All secrets live outside the repo:
 | File | Purpose |
 |------|---------|
 | [DESIGN.md](DESIGN.md) | Why we built it this way — office-hours design record |
-| [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | What's done, what's next — living tracker + original Phase 1 specs |
+| [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | What's done, what's next — living tracker + Phase 1 & 2 specs |
+| [Phase2_Issues.md](Phase2_Issues.md) | Phase 2 issue backlog and Sprint tracker |
+| [docs/GROWTH_STRATEGY.md](docs/GROWTH_STRATEGY.md) | 500-subscriber growth plan |
+| [docs/CHANNEL_ABOUT.md](docs/CHANNEL_ABOUT.md) | YouTube channel setup guide |
 
 ---
 
