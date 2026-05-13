@@ -278,16 +278,20 @@ def _generate_full_song_srt(lyrics_text, duration_sec):
 
     chunk_duration = duration_sec / len(lines)
     srt_parts = []
-    for i, line in enumerate(lines):
+    idx = 1
+    for i in range(0, len(lines), 2):
+        chunk = lines[i:i + 2]
+        chunk_text = "\n".join(chunk)
         start = i * chunk_duration
-        end = (i + 1) * chunk_duration
+        end = (i + len(chunk)) * chunk_duration
         # Ensure each subtitle is visible for at least 1.5s
         if end - start < 1.5:
             end = start + 1.5
-        srt_parts.append(str(i + 1))
+        srt_parts.append(str(idx))
         srt_parts.append(f"{_format_srt_time(start)} --> {_format_srt_time(min(end, duration_sec))}")
-        srt_parts.append(line)
+        srt_parts.append(chunk_text)
         srt_parts.append("")
+        idx += 1
 
     return "\n".join(srt_parts)
 
@@ -297,7 +301,7 @@ def _generate_full_song_srt(lyrics_text, duration_sec):
 # ---------------------------------------------------------------------------
 def _escape_ffmpeg_text(text):
     """Escape text for FFmpeg drawtext filter (single-quote delimited)."""
-    return text.replace("\\", "\\\\").replace("'", "\\'")
+    return text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +611,8 @@ def generate_per_song_assets(song_result, songs_dir, config=None):
     lyrics = song_result.get("lyrics", "")
     style_tags = ""
     song_num = song_result.get("song_number", 0)
-    safe = _sanitize_for_filename(title)
+    from nightly_music import sanitize_filename
+    safe = sanitize_filename(title)[:60]
 
     bg_path = os.path.join(songs_dir, f"{song_num:02d}-{safe}-bg.jpg")
     bg_vertical_path = os.path.join(songs_dir, f"{song_num:02d}-{safe}-bg-vertical.jpg")
@@ -913,8 +918,9 @@ def _extract_audio_segment(mp3_path, output_path, start_sec, duration_sec):
 def _generate_chorus_srt(lyrics, duration_sec=45):
     """Generate SRT subtitle content from lyrics for a short video.
 
-    Parses lyrics into lines, selects the most relevant portion (chorus or
-    middle section), and distributes them evenly across the duration.
+    Priority:
+    1. Extract lines within [Chorus] tags (preferred)
+    2. Fallback to middle third if no chorus tags found
 
     Args:
         lyrics: Full lyrics text
@@ -923,21 +929,33 @@ def _generate_chorus_srt(lyrics, duration_sec=45):
     Returns:
         SRT-formatted string, or empty string if no suitable lyrics found
     """
-    # Parse into lines: skip empty lines and section markers like [Verse]
-    lines = [
-        l.strip() for l in lyrics.split("\n")
-        if l.strip() and not l.strip().startswith("[")
-    ]
-    if not lines:
-        return ""
+    # Try to find [Chorus] section first
+    in_chorus = False
+    chorus_lines = []
+    for line in lyrics.split("\n"):
+        stripped = line.strip()
+        if stripped == "[Chorus]":
+            in_chorus = True
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_chorus = False
+            continue
+        if in_chorus and stripped:
+            chorus_lines.append(stripped)
 
-    # Select chorus portion: use middle section for the short
-    if len(lines) > 8:
-        # Take 4-6 lines from the middle or chorus section
-        chorus_start = len(lines) // 3
-        chorus_lines = lines[chorus_start:chorus_start + 6]
-    else:
-        chorus_lines = lines[:4]
+    # Fallback to middle third if no chorus tags found
+    if len(chorus_lines) < 2:
+        lines = [
+            l.strip() for l in lyrics.split("\n")
+            if l.strip() and not l.strip().startswith("[")
+        ]
+        if not lines:
+            return ""
+        if len(lines) > 8:
+            start = len(lines) // 3
+            chorus_lines = lines[start:start + 6]
+        else:
+            chorus_lines = lines[:4]
 
     # Filter out any lines that are too short or look like metadata
     chorus_lines = [l for l in chorus_lines if len(l) > 2]
@@ -981,13 +999,7 @@ def _ensure_script_dir_on_path():
         sys.path.insert(0, _script_dir)
 
 
-def _sanitize_for_filename(text):
-    """Sanitize text for use in filenames."""
-    text = re.sub(r"[:/\\|]", "-", text)
-    text = re.sub(r"['\"<>]", "", text)
-    text = re.sub(r"\s+", "_", text)
-    text = re.sub(r"-+", "-", text)
-    return text.strip(".-_ ").lower()[:60]
+# _sanitize_for_filename removed — use nightly_music.sanitize_filename instead
 
 
 def _safe_generate_prompt(title, lyrics, style_tags, orientation):

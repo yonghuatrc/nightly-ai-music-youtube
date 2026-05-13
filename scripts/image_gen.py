@@ -26,7 +26,6 @@ import time
 import urllib.parse
 import requests
 import argparse
-from PIL import Image
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -264,6 +263,7 @@ def generate_thumbnail_from_bg(bg_path, output_path, size=(1280, 720)):
     Returns:
         output_path on success
     """
+    from PIL import Image
     img = Image.open(bg_path)
     img = img.resize(size, Image.LANCZOS)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

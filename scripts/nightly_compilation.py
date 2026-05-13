@@ -357,27 +357,7 @@ def generate_compilation_thumbnail(output_dir, week_label):
     return ""
 
 
-def _find_cjk_font():
-    """Find a CJK-capable font on the system."""
-    candidates = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
-        "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return None
-
-
-def _escape_ffmpeg_text(text):
-    """Escape text for FFmpeg drawtext filter (single-quote delimited)."""
-    return text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+from nightly_visualizer import _find_cjk_font, _escape_ffmpeg_text
 
 
 # ---------------------------------------------------------------------------

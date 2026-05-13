@@ -126,6 +126,8 @@ def _duration_score(duration_sec: float) -> int:
 
 def _placeholder_score(lyrics: str) -> int:
     """Score 0-10: 0 if lyrics start with a placeholder pattern, 10 otherwise."""
+    if not lyrics.strip():
+        return 0
     cleaned = lyrics.lstrip()
     for pattern in PLACEHOLDER_PATTERNS:
         if cleaned.startswith(pattern):
@@ -189,6 +191,11 @@ def score_song_quality(
         + dim_placeholder * 0.15
         + dim_vocab * 0.10
     )
+
+    # Lyrics floor: if lyrics_length score is 0 AND total text < 50 chars,
+    # cap at 4.0 (standard max) to prevent near-empty lyrics from hitting hero
+    if dim_lyrics_length == 0 and len(lyrics.strip()) < 50:
+        total = min(total, 4.0)
 
     # Verdict
     if total >= hero_threshold:
