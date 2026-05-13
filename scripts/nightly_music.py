@@ -52,11 +52,13 @@ try:
     from nightly_visualizer import generate_thumbnail as _generate_thumbnail
     from nightly_visualizer import generate_per_song_assets as _generate_per_song_assets
     from nightly_visualizer import generate_short as _generate_short
+    from nightly_visualizer import detect_mood_from_lyrics as _detect_mood
 except ImportError:
     _generate_visualizer = None
     _generate_thumbnail = None
     _generate_per_song_assets = None
     _generate_short = None
+    _detect_mood = None
 
 try:
     import image_gen
@@ -480,9 +482,16 @@ def send_telegram_batch(songs_batch, batch_num, total_batches, date_label):
 # ---------------------------------------------------------------------------
 # Visualizer wrapper (graceful fallback if module missing)
 # ---------------------------------------------------------------------------
-def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None):
+def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None,
+                             lyrics="", mood_palette=None, lyrics_overlay=True):
     """
     Generate visualizer MP4 from MP3. Gracefully handles missing module.
+
+    Phase 2 params:
+        lyrics: Full lyrics text for SRT subtitle generation
+        mood_palette: Color palette string for mood-based waveform colors
+        lyrics_overlay: Whether to burn SRT subtitles into video
+
     Returns dict with keys: path, duration, status, error.
     """
     if _generate_visualizer is None:
@@ -495,6 +504,9 @@ def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None):
             title=title,
             background_image=None,
             duration_sec=duration_sec,
+            lyrics=lyrics,
+            mood_palette=mood_palette,
+            lyrics_overlay=lyrics_overlay,
         )
     except Exception as e:
         print(f"[nightly] Visualizer exception: {e}", file=sys.stderr)
@@ -504,9 +516,17 @@ def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None):
 # ---------------------------------------------------------------------------
 # YouTube uploader wrapper (graceful fallback if module missing)
 # ---------------------------------------------------------------------------
-def upload_to_youtube(video_path, title, prompt, date_label, lyrics="", thumbnail_path=""):
+def upload_to_youtube(video_path, title, prompt, date_label, lyrics="",
+                       thumbnail_path="", publish_hour=18):
     """
     Upload video to YouTube with defaults. Gracefully handles missing deps.
+
+    Phase 2: publish_hour controls staggered scheduling.
+    Hero (song 1) → 18:00 SGT, Standard (song 2) → 20:00 SGT.
+
+    Args:
+        publish_hour: Hour for scheduled publish (SGT, 24h format, default 18)
+
     Returns dict with keys: video_id, youtube_url, status, error.
     """
     if _upload_video is None:
@@ -540,13 +560,13 @@ def upload_to_youtube(video_path, title, prompt, date_label, lyrics="", thumbnai
     privacy = yt_cfg.get("privacy", "private")
     category = yt_cfg.get("category", "10")
 
-    # Compute publish_at: 6pm SGT on the target date
+    # Compute publish_at: staggered by publish_hour SGT
     publish_at = None
     try:
         from datetime import datetime, timezone, timedelta
         sgt = timezone(timedelta(hours=8))
         publish_dt = datetime.strptime(date_label, "%Y-%m-%d").replace(
-            hour=18, minute=0, second=0, tzinfo=sgt
+            hour=publish_hour, minute=0, second=0, tzinfo=sgt
         )
         publish_at = publish_dt.isoformat()
     except Exception as e:
@@ -816,11 +836,26 @@ def run_pipeline(date_str, dry_run=False):
                     }
                     print(f"[nightly] [DRY RUN] Would generate visualizer: {os.path.basename(mp4_path)}")
                 else:
+                    # Phase 2: Mood detection + SRT lyrics overlay
+                    viz_cfg = config.get("visualizer", {})
+                    lyrics_overlay = viz_cfg.get("lyrics_overlay", True)
+                    mood_colors = viz_cfg.get("mood_colors", True)
+                    mood_palette = None
+                    if mood_colors and _detect_mood:
+                        _, mood_palette = _detect_mood(
+                            song.get("lyrics", ""),
+                            song.get("title", ""),
+                        )
+                    viz_lyrics = song.get("lyrics", "") if lyrics_overlay else ""
+
                     viz_result = generate_visualizer_mp4(
                         mp3_path=song["mp3_path"],
                         output_path=mp4_path,
                         title=title,
                         duration_sec=song.get("duration_sec"),
+                        lyrics=viz_lyrics,
+                        mood_palette=mood_palette,
+                        lyrics_overlay=lyrics_overlay,
                     )
 
                 song["mp4_path"] = viz_result.get("path", "")
@@ -940,6 +975,9 @@ def run_pipeline(date_str, dry_run=False):
                     }
                     print(f"[nightly] [DRY RUN] Would upload: {song['title'][:50]}")
                 else:
+                    # Phase 2: Staggered upload — Hero at 18:00, Standard at 20:00
+                    song_num = song.get("song_number", 1)
+                    publish_hour = 18 if song_num == 1 else 20
                     upload_result = upload_to_youtube(
                         video_path=song["mp4_path"],
                         title=song["title"],
@@ -947,6 +985,7 @@ def run_pipeline(date_str, dry_run=False):
                         date_label=date_label,
                         lyrics=song.get("lyrics", ""),
                         thumbnail_path=song.get("thumbnail_path", ""),
+                        publish_hour=publish_hour,
                     )
                 song["youtube_video_id"] = upload_result.get("video_id", "")
                 song["youtube_url"] = upload_result.get("url", upload_result.get("youtube_url", ""))

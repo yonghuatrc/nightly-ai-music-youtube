@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import argparse
 from pathlib import Path
 
@@ -151,6 +152,134 @@ def _generate_background_via_api():
 
 
 # ---------------------------------------------------------------------------
+# Mood detection — Phase 2: mood-based color palettes for waveform
+# ---------------------------------------------------------------------------
+MOOD_PALETTES = {
+    "romantic": "#FF6B6B|#FF9F9F|#FFD4D4",     # Pinks
+    "melancholy": "#4A90D9|#6A5ACD|#2F4F7F",    # Blues
+    "upbeat": "#FFD700|#FF8C00|#FF6347",         # Warm bright
+    "calm": "#98D8C8|#7EC8E3|#B8E6D0",          # Pastels
+    "energetic": "#FF3366|#FF6633|#FFCC00",      # Vibrant
+    "sad": "#708090|#4A5568|#2D3748",            # Greys
+    "chill": "#A29BFE|#6C5CE7|#DDA0DD",          # Purple/lavender
+}
+
+# Keywords for rule-based mood detection fallback
+# Title matches weighted higher (checked twice), lyrics checked once
+_MOOD_KEYWORDS = {
+    "romantic": [
+        "爱", "love", "forever", "永远", "heart", "you", "你",
+        "kiss", "吻", "together", "一起", "baby", "亲爱的",
+    ],
+    "melancholy": [
+        "泪", "cry", "sad", "离开", "leave", "gone", "失去",
+        "lost", "寂寞", "lonely", "孤独", "回忆", "memory",
+    ],
+    "upbeat": [
+        "阳光", "sun", "smile", "happy", "joy", "快乐",
+        "笑", "跳", "奔跑", "run", "dance", "舞", "shine",
+    ],
+    "calm": [
+        "星", "star", "moon", "night", "梦", "dream",
+        "温柔", "gentle", "静", "quiet", "peace", "月",
+    ],
+    "energetic": [
+        "fire", "burn", "power", "strong", "强", "燃",
+        "fight", "never", "give", "up", "energy", "爆发",
+    ],
+    "sad": [
+        "泪", "cry", "sad", "离开", "gone", "goodbye",
+        "再见", "痛", "rain", "雨", "hurt", "broken", "break",
+    ],
+    "chill": [
+        "梦", "dream", "温柔", "wind", "风", "cloud", "云",
+        "float", "fly", "飞翔", "free", "breeze", "sky", "天空",
+    ],
+}
+
+_DEFAULT_MOOD = "chill"
+
+
+def detect_mood_from_lyrics(lyrics, title=""):
+    """Detect song mood from lyrics keywords.
+
+    Rule-based fallback: scores each mood by keyword matches.
+    Title is weighted 2x (checked case-insensitive).
+    Lyrics are weighted 1x.
+
+    Args:
+        lyrics: Full lyrics text
+        title: Song title (optional, weighted higher)
+
+    Returns:
+        Tuple of (mood_key, palette_string) — e.g. ("romantic", "#FF6B6B|#FF9F9F|#FFD4D4")
+    """
+    title_lower = title.lower() if title else ""
+    lyrics_lower = lyrics.lower() if lyrics else ""
+
+    scores = {}
+    for mood, keywords in _MOOD_KEYWORDS.items():
+        score = 0
+        for kw in keywords:
+            kw_lower = kw.lower()
+            # Title matches count 2x
+            if title_lower:
+                score += title_lower.count(kw_lower) * 2
+            # Lyrics matches count 1x
+            score += lyrics_lower.count(kw_lower)
+        if score > 0:
+            scores[mood] = score
+
+    if scores:
+        best = max(scores, key=scores.get)
+        palette = MOOD_PALETTES[best]
+        print(f"[nightly:visualizer] Detected mood: '{best}' (score {scores[best]}) → {palette}")
+        return best, palette
+
+    print(f"[nightly:visualizer] No mood keywords found, default to '{_DEFAULT_MOOD}'")
+    return _DEFAULT_MOOD, MOOD_PALETTES[_DEFAULT_MOOD]
+
+
+# ---------------------------------------------------------------------------
+# Full-song SRT generation — Phase 2: lyrics overlay on long-form videos
+# ---------------------------------------------------------------------------
+def _generate_full_song_srt(lyrics_text, duration_sec):
+    """Generate SRT subtitles for the full song length.
+
+    Distributes ALL non-tag lyric lines evenly across the full duration.
+
+    Args:
+        lyrics_text: Full lyrics with section markers like [Verse]
+        duration_sec: Total song duration in seconds
+
+    Returns:
+        SRT-formatted string, or empty string if no suitable lyrics
+    """
+    lines = []
+    for line in lyrics_text.split("\n"):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("["):
+            lines.append(stripped)
+    if not lines:
+        return ""
+
+    chunk_duration = duration_sec / len(lines)
+    srt_parts = []
+    for i, line in enumerate(lines):
+        start = i * chunk_duration
+        end = (i + 1) * chunk_duration
+        # Ensure each subtitle is visible for at least 1.5s
+        if end - start < 1.5:
+            end = start + 1.5
+        srt_parts.append(str(i + 1))
+        srt_parts.append(f"{_format_srt_time(start)} --> {_format_srt_time(min(end, duration_sec))}")
+        srt_parts.append(line)
+        srt_parts.append("")
+
+    return "\n".join(srt_parts)
+
+
+# ---------------------------------------------------------------------------
 # Text escaping for FFmpeg drawtext
 # ---------------------------------------------------------------------------
 def _escape_ffmpeg_text(text):
@@ -161,9 +290,15 @@ def _escape_ffmpeg_text(text):
 # ---------------------------------------------------------------------------
 # Core visualizer
 # ---------------------------------------------------------------------------
-def generate_visualizer(mp3_path, output_path, title, background_image=None, duration_sec=None):
+def generate_visualizer(mp3_path, output_path, title, background_image=None,
+                        duration_sec=None, lyrics="", mood_palette=None,
+                        lyrics_overlay=True):
     """
     Generate an MP4 visualizer video from an MP3 file.
+
+    Phase 2 enhancements:
+    - Mood-based waveform colors (if mood_palette provided)
+    - Full-song SRT subtitle overlay (if lyrics and lyrics_overlay)
 
     Args:
         mp3_path: Path to input MP3 file
@@ -171,6 +306,9 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None, dur
         title: Song title for text overlay
         background_image: Optional path to background image
         duration_sec: Optional max duration in seconds (truncates if set)
+        lyrics: Full lyrics text for SRT subtitle generation (Phase 2)
+        mood_palette: Color palette string like "#FF6B6B|#4ECDC4" (Phase 2)
+        lyrics_overlay: Whether to burn SRT subtitles into video (Phase 2)
 
     Returns:
         dict with keys: path, duration, status (ok/failed), error (if failed)
@@ -209,6 +347,37 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None, dur
     # Escaped title for drawtext
     escaped_title = _escape_ffmpeg_text(title)
 
+    # ── Phase 2: Mood-based waveform colors ──────────────────────────────
+    colors_used = "#FF6B6B|#4ECDC4"  # default
+    if mood_palette:
+        colors_used = mood_palette
+        print(f"[nightly:visualizer] Using mood palette: {mood_palette}")
+
+    # ── Phase 2: Full-song SRT subtitle generation ───────────────────────
+    temp_srt_path = None
+    srt_content = ""
+    if lyrics and lyrics_overlay:
+        actual_duration = duration_sec or _probe_duration(mp3_path)
+        if actual_duration > 0:
+            srt_content = _generate_full_song_srt(lyrics, actual_duration)
+            if srt_content:
+                # Write SRT to temp file for FFmpeg subtitles filter
+                temp_srt_path = os.path.join(
+                    output_dir or ".",
+                    f".srt-temp-{int(time.time())}.srt"
+                )
+                with open(temp_srt_path, "w", encoding="utf-8") as f:
+                    f.write(srt_content)
+                # Also save a permanent copy alongside the MP4
+                srt_permanent = output_path.replace(".mp4", ".srt")
+                with open(srt_permanent, "w", encoding="utf-8") as f:
+                    f.write(srt_content)
+                print(f"[nightly:visualizer] Full-song SRT: {len(srt_content)} chars, "
+                      f"{srt_content.count('\\n\\n') + 1} subtitles")
+        else:
+            print(f"[nightly:visualizer] Cannot generate SRT — duration unknown",
+                  file=sys.stderr)
+
     # Build FFmpeg command
     cmd = [_FFMPEG, "-y"]
 
@@ -229,19 +398,26 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None, dur
 
     waves_chain = (
         "[1:a]showwaves=s=1920x400:mode=cline:rate=25:"
-        "colors=#FF6B6B|#4ECDC4[waves]"
+        f"colors={colors_used}[waves]"
     )
 
+    # Overlay chain: background + waveform + title + optional subtitles
+    overlay_parts = [f"[bg][waves]overlay=0:(H-400)/2"]
+
     if has_font:
-        overlay_chain = (
-            f"[bg][waves]overlay=0:(H-400)/2,"
+        overlay_parts.append(
             f"drawtext=text='{escaped_title}':fontfile={font_path}:"
             f"fontcolor=white:fontsize=48:x=(w-text_w)/2:y=H-100:"
-            f"expansion=none[out]"
+            f"expansion=none"
         )
-    else:
-        overlay_chain = "[bg][waves]overlay=0:(H-400)/2[out]"
 
+    if temp_srt_path and srt_content:
+        overlay_parts.append(
+            f"subtitles={temp_srt_path}:"
+            f"fontsdir={os.path.dirname(font_path) if font_path else '/'}"
+        )
+
+    overlay_chain = ",".join(overlay_parts) + "[out]"
     filter_complex = ";".join([bg_chain, waves_chain, overlay_chain])
 
     cmd.extend([
@@ -306,6 +482,13 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None, dur
     except Exception as e:
         result["error"] = str(e)
         print(f"[nightly:visualizer] Exception: {e}", file=sys.stderr)
+    finally:
+        # Clean up temp SRT file
+        if temp_srt_path and os.path.exists(temp_srt_path):
+            try:
+                os.remove(temp_srt_path)
+            except Exception:
+                pass
 
     return result
 

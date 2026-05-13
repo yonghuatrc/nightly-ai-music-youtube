@@ -61,12 +61,16 @@ youtube:
 visualizer:
   enabled: true
   resolution: "1920x1080"
+  # Phase 2: Burn SRT subtitles into long-form video (improves retention)
+  lyrics_overlay: true
+  # Phase 2: Detect mood from lyrics → color-shift waveform palette
+  mood_colors: true
 
 # Shorts generation — YouTube Shorts (9:16 vertical, chorus-based)
 # Each song gets a Short clipped to the loudest 45-second segment.
 shorts:
   enabled: true
-  duration_sec: 45
+  duration_sec: 30  # Phase 2: 45s → 30s (higher retention)
   upload_time: "12:00"
   tags:
     - "#Shorts"
