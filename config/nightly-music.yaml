@@ -103,3 +103,9 @@ max_lyrics_retries: 3
 # Disable by setting enabled: false.
 weekly_themes:
   enabled: true
+
+# Weekly compilation album (Sunday only)
+# Concatenates Mon-Sat's Hero videos into a single ~30-45 min album.
+compilation:
+  enabled: true
+  max_duration_min: 45

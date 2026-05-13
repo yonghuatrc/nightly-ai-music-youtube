@@ -48,6 +48,12 @@ from minimax_music_api import generate_and_save
 from song_quality import score_song_quality
 from weekly_themes import get_today_theme, apply_theme_to_prompt
 
+# Optional imports — weekly compilation album (Sundays only)
+try:
+    from nightly_compilation import build_weekly_compilation as _build_weekly_compilation
+except ImportError:
+    _build_weekly_compilation = None
+
 # Optional imports — visualizer and YouTube uploader (graceful fallback)
 try:
     from nightly_visualizer import generate_visualizer as _generate_visualizer
@@ -496,7 +502,8 @@ def send_telegram_batch(songs_batch, batch_num, total_batches, date_label):
 # Visualizer wrapper (graceful fallback if module missing)
 # ---------------------------------------------------------------------------
 def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None,
-                             lyrics="", mood_palette=None, lyrics_overlay=True):
+                             lyrics="", mood_palette=None, lyrics_overlay=True,
+                             background_image=None):
     """
     Generate visualizer MP4 from MP3. Gracefully handles missing module.
 
@@ -504,6 +511,7 @@ def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None,
         lyrics: Full lyrics text for SRT subtitle generation
         mood_palette: Color palette string for mood-based waveform colors
         lyrics_overlay: Whether to burn SRT subtitles into video
+        background_image: Optional path to per-song background image
 
     Returns dict with keys: path, duration, status, error.
     """
@@ -515,7 +523,7 @@ def generate_visualizer_mp4(mp3_path, output_path, title, duration_sec=None,
             mp3_path=mp3_path,
             output_path=output_path,
             title=title,
-            background_image=None,
+            background_image=background_image,
             duration_sec=duration_sec,
             lyrics=lyrics,
             mood_palette=mood_palette,
@@ -896,80 +904,7 @@ def run_pipeline(date_str, dry_run=False):
                 song["quality_score"] = 0.0
                 song["quality_verdict"] = "reject"
 
-    # Step 4: Generate visualizers
-    visualizer_enabled = config.get("visualizer", {}).get("enabled", True)
-    visualizer_results = []
-    if visualizer_enabled:
-        for song in song_results:
-            is_rejected_viz = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
-            if song["status"] == "success" and not is_rejected_viz:
-                title = song["title"]
-                safe_viz = sanitize_filename(title)
-                mp4_path = os.path.join(songs_dir, f"{song['song_number']:02d}-{safe_viz}-viz.mp4")
-
-                if dry_run:
-                    viz_result = {
-                        "path": mp4_path,
-                        "duration": song.get("duration_sec", 0),
-                        "status": "ok",
-                        "error": None,
-                    }
-                    print(f"[nightly] [DRY RUN] Would generate visualizer: {os.path.basename(mp4_path)}")
-                else:
-                    # Phase 2: Mood detection + SRT lyrics overlay
-                    viz_cfg = config.get("visualizer", {})
-                    lyrics_overlay = viz_cfg.get("lyrics_overlay", True)
-                    mood_colors = viz_cfg.get("mood_colors", True)
-                    mood_palette = None
-                    if mood_colors and _detect_mood:
-                        _, mood_palette = _detect_mood(
-                            song.get("lyrics", ""),
-                            song.get("title", ""),
-                            theme_mood=weekly_theme.get("mood") if weekly_theme else None,
-                        )
-                    viz_lyrics = song.get("lyrics", "") if lyrics_overlay else ""
-
-                    viz_result = generate_visualizer_mp4(
-                        mp3_path=song["mp3_path"],
-                        output_path=mp4_path,
-                        title=title,
-                        duration_sec=song.get("duration_sec"),
-                        lyrics=viz_lyrics,
-                        mood_palette=mood_palette,
-                        lyrics_overlay=lyrics_overlay,
-                    )
-
-                song["mp4_path"] = viz_result.get("path", "")
-                song["visualizer_status"] = viz_result.get("status", "failed")
-                visualizer_results.append(viz_result)
-
-                # Generate thumbnail
-                thumbnail_path = os.path.join(songs_dir, f"{song['song_number']:02d}-{sanitize_filename(song['title'])}-thumb.jpg")
-                if _generate_thumbnail:
-                    thumb_result = _generate_thumbnail(
-                        song["title"],
-                        thumbnail_path,
-                        bg_image=None,
-                    )
-                    song["thumbnail_path"] = thumb_result.get("path", "")
-                    if thumb_result["status"] == "ok":
-                        print(f"[nightly] Thumbnail generated: {os.path.basename(thumbnail_path)}")
-                else:
-                    song["thumbnail_path"] = ""
-            elif is_rejected_viz:
-                song["mp4_path"] = ""
-                song["visualizer_status"] = "skipped"
-                print(f"[nightly] Visualizer skipped for #{song['song_number']} ({song.get('quality_verdict', 'reject')})")
-            else:
-                song["mp4_path"] = ""
-                song["visualizer_status"] = "skipped"
-    else:
-        print("[nightly] Visualizer disabled in config — skipping")
-        for song in song_results:
-            song["mp4_path"] = ""
-            song["visualizer_status"] = "disabled"
-
-    # Step 4.5: Generate per-song backgrounds + Shorts
+    # Step 4: Generate per-song backgrounds + Shorts (must run BEFORE visualizer to set bg_path)
     shorts_cfg = config.get("shorts", {})
     shorts_enabled = shorts_cfg.get("enabled", True)
     if shorts_enabled:
@@ -1047,7 +982,70 @@ def run_pipeline(date_str, dry_run=False):
             song["short_path"] = ""
             song["short_status"] = "disabled"
 
-    # Step 5: Upload to YouTube
+    # Step 5: Generate visualizers (uses bg_path from Step 4)
+    visualizer_enabled = config.get("visualizer", {}).get("enabled", True)
+    visualizer_results = []
+    if visualizer_enabled:
+        for song in song_results:
+            is_rejected_viz = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
+            if song["status"] == "success" and not is_rejected_viz:
+                title = song["title"]
+                safe_viz = sanitize_filename(title)
+                mp4_path = os.path.join(songs_dir, f"{song['song_number']:02d}-{safe_viz}-viz.mp4")
+
+                if dry_run:
+                    viz_result = {
+                        "path": mp4_path,
+                        "duration": song.get("duration_sec", 0),
+                        "status": "ok",
+                        "error": None,
+                    }
+                    print(f"[nightly] [DRY RUN] Would generate visualizer: {os.path.basename(mp4_path)}")
+                else:
+                    # Phase 2: Mood detection + SRT lyrics overlay
+                    viz_cfg = config.get("visualizer", {})
+                    lyrics_overlay = viz_cfg.get("lyrics_overlay", True)
+                    mood_colors = viz_cfg.get("mood_colors", True)
+                    mood_palette = None
+                    if mood_colors and _detect_mood:
+                        _, mood_palette = _detect_mood(
+                            song.get("lyrics", ""),
+                            song.get("title", ""),
+                            theme_mood=weekly_theme.get("mood") if weekly_theme else None,
+                        )
+                    viz_lyrics = song.get("lyrics", "") if lyrics_overlay else ""
+
+                    viz_result = generate_visualizer_mp4(
+                        mp3_path=song["mp3_path"],
+                        output_path=mp4_path,
+                        title=title,
+                        duration_sec=song.get("duration_sec"),
+                        lyrics=viz_lyrics,
+                        mood_palette=mood_palette,
+                        lyrics_overlay=lyrics_overlay,
+                        background_image=song.get("bg_path"),  # B2 fix: pass per-song background
+                    )
+
+                song["mp4_path"] = viz_result.get("path", "")
+                song["visualizer_status"] = viz_result.get("status", "failed")
+                visualizer_results.append(viz_result)
+
+                # Thumbnail is handled by generate_per_song_assets (Step 4) — Pillow-based, higher quality
+                song["thumbnail_path"] = song.get("thumbnail_path", "")
+            elif is_rejected_viz:
+                song["mp4_path"] = ""
+                song["visualizer_status"] = "skipped"
+                print(f"[nightly] Visualizer skipped for #{song['song_number']} ({song.get('quality_verdict', 'reject')})")
+            else:
+                song["mp4_path"] = ""
+                song["visualizer_status"] = "skipped"
+    else:
+        print("[nightly] Visualizer disabled in config — skipping")
+        for song in song_results:
+            song["mp4_path"] = ""
+            song["visualizer_status"] = "disabled"
+
+    # Step 6: Upload to YouTube
     youtube_cfg = config.get("youtube", {})
     youtube_enabled = youtube_cfg.get("enabled", False)
     youtube_results = []
@@ -1104,7 +1102,7 @@ def run_pipeline(date_str, dry_run=False):
             song["youtube_url"] = ""
             song["youtube_status"] = "disabled"
 
-    # Step 5.5: Upload Shorts to YouTube
+    # Step 6.5: Upload Shorts to YouTube
     if shorts_enabled:
         for song in song_results:
             is_rejected_short_upload = quality_enabled and not dry_run and song.get("quality_verdict") == "reject"
@@ -1144,13 +1142,13 @@ def run_pipeline(date_str, dry_run=False):
             song["short_youtube_url"] = ""
             song["short_upload_status"] = "disabled"
 
-    # Step 6: Sync to D-drive
+    # Step 7: Sync to D-drive
     if not dry_run:
         sync_to_d_drive(songs_dir, d_drive_target)
     else:
         print(f"[nightly] [DRY RUN] Would sync: {songs_dir} → {d_drive_target}")
 
-    # Step 7: Log
+    # Step 8: Log
     log_entries = []
     for r in song_results:
         log_entries.append({
@@ -1195,7 +1193,7 @@ def run_pipeline(date_str, dry_run=False):
     else:
         print(f"[nightly] [DRY RUN] Would log {len(log_entries)} entries")
 
-    # Step 8: Telegram delivery
+    # Step 9: Telegram delivery
     successful_songs = [r for r in song_results if r["status"] == "success"]
     failed_songs = [r for r in song_results if r["status"] == "failed"]
 
@@ -1261,6 +1259,38 @@ def run_pipeline(date_str, dry_run=False):
                 print(f"[nightly] Failed summary send FAILED: {e}", file=sys.stderr)
     else:
         print(f"[nightly] [DRY RUN] Would send {len(successful_songs)} songs in batches of {songs_per_msg}")
+
+    # Step 10: Weekly compilation (Sundays only)
+    try:
+        dt_comp = datetime.strptime(date_label, "%Y-%m-%d")
+        is_sunday = dt_comp.weekday() == 6
+    except Exception:
+        is_sunday = False
+
+    if is_sunday:
+        comp_cfg = config.get("compilation", {})
+        comp_enabled = comp_cfg.get("enabled", True)
+        if comp_enabled and _build_weekly_compilation:
+            print(f"\n{'─'*50}")
+            print(f"[nightly] Sunday detected — running weekly compilation")
+            print(f"{'─'*50}\n")
+            try:
+                comp_result = _build_weekly_compilation(
+                    date_label, config, dry_run=dry_run
+                )
+                if comp_result["status"] == "ok":
+                    print(f"[nightly] Compilation OK — {comp_result.get('video_path', '')}")
+                else:
+                    print(f"[nightly] Compilation skipped/warning: {comp_result.get('error', 'unknown')}")
+            except Exception as e:
+                print(f"[nightly] Compilation FAILED: {e}", file=sys.stderr)
+        elif not _build_weekly_compilation:
+            print("[nightly] Compilation module not available — skipping Sunday compilation",
+                  file=sys.stderr)
+        else:
+            print("[nightly] Compilation disabled in config — skipping Sunday compilation")
+    else:
+        print(f"[nightly] {date_label} is not Sunday — skipping weekly compilation")
 
     # Summary
     success_count = sum(1 for r in song_results if r["status"] == "success")
