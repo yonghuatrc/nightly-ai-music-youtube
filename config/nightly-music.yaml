@@ -97,3 +97,9 @@ visual:
 
 # API retry settings
 max_lyrics_retries: 3
+
+# Weekly themes — day-of-week mood modifiers for song prompts
+# Each day gets a consistent mood/vibe to build channel identity.
+# Disable by setting enabled: false.
+weekly_themes:
+  enabled: true

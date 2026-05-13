@@ -200,16 +200,19 @@ _MOOD_KEYWORDS = {
 _DEFAULT_MOOD = "chill"
 
 
-def detect_mood_from_lyrics(lyrics, title=""):
-    """Detect song mood from lyrics keywords.
+def detect_mood_from_lyrics(lyrics, title="", theme_mood=None):
+    """Detect song mood from lyrics keywords, with optional weekly theme boost.
 
     Rule-based fallback: scores each mood by keyword matches.
     Title is weighted 2x (checked case-insensitive).
     Lyrics are weighted 1x.
+    Theme mood (from weekly themes) gets +2 boost to ensure channel consistency.
 
     Args:
         lyrics: Full lyrics text
         title: Song title (optional, weighted higher)
+        theme_mood: Optional mood key from weekly themes (e.g. "romantic").
+                    Gets a +2 score boost for channel identity consistency.
 
     Returns:
         Tuple of (mood_key, palette_string) — e.g. ("romantic", "#FF6B6B|#FF9F9F|#FFD4D4")
@@ -227,14 +230,24 @@ def detect_mood_from_lyrics(lyrics, title=""):
                 score += title_lower.count(kw_lower) * 2
             # Lyrics matches count 1x
             score += lyrics_lower.count(kw_lower)
-        if score > 0:
+        if score > 0 or mood == theme_mood:
             scores[mood] = score
+
+    # Boost weekly theme mood for channel identity consistency
+    if theme_mood and theme_mood in scores:
+        scores[theme_mood] += 2
+        print(f"[nightly:visualizer] Theme mood boost: '{theme_mood}' +2")
 
     if scores:
         best = max(scores, key=scores.get)
         palette = MOOD_PALETTES[best]
         print(f"[nightly:visualizer] Detected mood: '{best}' (score {scores[best]}) → {palette}")
         return best, palette
+
+    # Theme mood acts as final fallback even if no keywords matched
+    if theme_mood and theme_mood in MOOD_PALETTES:
+        print(f"[nightly:visualizer] No mood keywords found, using theme fallback '{theme_mood}'")
+        return theme_mood, MOOD_PALETTES[theme_mood]
 
     print(f"[nightly:visualizer] No mood keywords found, default to '{_DEFAULT_MOOD}'")
     return _DEFAULT_MOOD, MOOD_PALETTES[_DEFAULT_MOOD]

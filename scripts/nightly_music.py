@@ -46,6 +46,7 @@ sys.path.insert(0, SCRIPTS_DIR)
 sys.path.insert(0, "/home/dennis/.hermes/venv/lib/python3.12/site-packages")
 from minimax_music_api import generate_and_save
 from song_quality import score_song_quality
+from weekly_themes import get_today_theme, apply_theme_to_prompt
 
 # Optional imports — visualizer and YouTube uploader (graceful fallback)
 try:
@@ -711,6 +712,14 @@ def run_pipeline(date_str, dry_run=False):
 
     print(f"[nightly] Config: {song_count} songs, source={sources}, batch={songs_per_msg}/msg")
 
+    # Weekly theme injection — Sprint 3: day-of-week mood modifiers
+    weekly_themes_cfg = config.get("weekly_themes", {})
+    weekly_theme = get_today_theme(date_str) if weekly_themes_cfg.get("enabled", True) else None
+    if weekly_theme and weekly_themes_cfg.get("enabled", True):
+        print(f"[nightly] Theme: {weekly_theme['emoji']} {date_str} is {weekly_theme['mood'].title()} — {weekly_theme['style']}")
+    else:
+        weekly_theme = None
+
     # Step 1: Create daily folder
     songs_dir = os.path.join(output_dir, date_label)
     os.makedirs(songs_dir, exist_ok=True)
@@ -782,6 +791,10 @@ def run_pipeline(date_str, dry_run=False):
 
         if not prompt:
             prompt = f"类似{artist}的《{song_ref}》风格，华语流行抒情，钢琴为主，温暖声线"
+
+        # Apply weekly theme modifier
+        if weekly_theme:
+            prompt = apply_theme_to_prompt(prompt, weekly_theme, song_num)
 
         print(f"[nightly] --- Song {song_num}/{song_count}: Inspired by {artist} - {song_ref} ---")
 
@@ -912,6 +925,7 @@ def run_pipeline(date_str, dry_run=False):
                         _, mood_palette = _detect_mood(
                             song.get("lyrics", ""),
                             song.get("title", ""),
+                            theme_mood=weekly_theme.get("mood") if weekly_theme else None,
                         )
                     viz_lyrics = song.get("lyrics", "") if lyrics_overlay else ""
 
@@ -1143,6 +1157,8 @@ def run_pipeline(date_str, dry_run=False):
             "date": date_label,
             "song_number": r["song_number"],
             "language": config_lang,
+            "weekly_theme_mood": weekly_theme.get("mood") if weekly_theme else None,
+            "weekly_theme_style": weekly_theme.get("style") if weekly_theme else None,
             "style_source": "|".join(sources) if isinstance(sources, list) else sources,
             "style_reference": f"{r.get('trending_artist', '')} - {r.get('trending_song', '')}",
             "prompt_used": r.get("prompt", ""),
