@@ -520,16 +520,16 @@ def upload_to_youtube(video_path, title, prompt, date_label, lyrics="", thumbnai
         print("[nightly] YouTube upload disabled in config — skipping")
         return {"video_id": "", "youtube_url": "", "status": "disabled", "error": None}
 
-    # Build SEO-optimized description
+    # Build SEO-optimized description — FULL lyrics (not just snippet)
     lyrics_lines = [l for l in lyrics.split("\n") if l.strip() and not l.startswith("[")]
-    lyrics_snippet = "\n".join(lyrics_lines[:4]) if lyrics_lines else "🎶"
+    lyrics_full = "\n".join(lyrics_lines) if lyrics_lines else "🎶"
 
     description = (
         f"🎵 {title} — AI创作的华语流行歌曲。"
         f"每日更新AI音乐作品，喜欢华语流行音乐的朋友不要错过！\n\n"
         f"🎤 灵感来源: {prompt}\n"
         f"📅 发布日期: {date_label}\n\n"
-        f"📝 歌词片段:\n{lyrics_snippet}\n\n"
+        f"📝 完整歌词:\n{lyrics_full}\n\n"
         f"💬 这首歌怎么样？评论区告诉我们！\n"
         f"🔔 订阅频道，每天收听新歌！\n\n"
         f"---\n"
@@ -590,16 +590,16 @@ def upload_shorts_to_youtube(short_path, title, prompt, date_label, lyrics="", t
         print("[nightly] YouTube upload disabled in config — skipping Shorts upload")
         return {"video_id": "", "youtube_url": "", "status": "disabled", "error": None}
 
-    # Shorts-optimized description
+    # Shorts-optimized description — FULL lyrics (not just 2 lines)
     lyrics_lines = [l for l in lyrics.split("\n") if l.strip() and not l.startswith("[")]
-    lyrics_snippet = "\n".join(lyrics_lines[:2]) if lyrics_lines else "🎶"
+    lyrics_full = "\n".join(lyrics_lines) if lyrics_lines else "🎶"
 
     description = (
         f"🎵 {title} — AI创作的华语流行歌曲片段\n\n"
         f"完整歌曲每日18:00发布！\n"
         f"🎤 灵感来源: {prompt}\n"
         f"📅 发布日期: {date_label}\n\n"
-        f"📝 歌词:\n{lyrics_snippet}\n\n"
+        f"📝 歌词:\n{lyrics_full}\n\n"
         f"💬 喜欢的话点赞评论！\n"
         f"🔔 订阅频道，每天收听新歌！\n\n"
         f"---\n"
@@ -891,6 +891,8 @@ def run_pipeline(date_str, dry_run=False):
                     print(f"[nightly] [DRY RUN] Would generate Short: {os.path.basename(short_path)}")
                     song["short_path"] = short_path
                     song["short_status"] = "ok"
+                    with open(short_path, "w") as f:
+                        f.write(f"DRY RUN SHORT PLACEHOLDER - {artist} - {song_ref}")
                 else:
                     try:
                         short_result = _generate_short(
