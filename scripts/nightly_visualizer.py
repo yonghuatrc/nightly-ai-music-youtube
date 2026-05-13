@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import argparse
+import json
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -254,46 +255,272 @@ def detect_mood_from_lyrics(lyrics, title="", theme_mood=None):
 
 
 # ---------------------------------------------------------------------------
-# Full-song SRT generation — Phase 2: lyrics overlay on long-form videos
+# Full-song SRT generation — Phase 2+: section-weighted timing + silence
 # ---------------------------------------------------------------------------
-def _generate_full_song_srt(lyrics_text, duration_sec):
-    """Generate SRT subtitles for the full song length.
 
-    Distributes ALL non-tag lyric lines evenly across the full duration.
+# Section pacing factors: each section type gets a multiplier applied to
+# its line count. Higher = slower (more time per line), lower = faster.
+SECTION_PACING = {
+    "intro": 1.5,       # Slowest — spacious opening
+    "verse": 1.2,       # Slower — narrative pace
+    "pre-chorus": 1.0,  # Normal — building energy
+    "chorus": 0.8,      # Faster — punchy, quick delivery
+    "bridge": 1.3,      # Slower — reflective
+    "outro": 1.5,       # Slowest — wind down
+    "default": 1.0,     # Fallback
+}
+
+MIN_SRT_DURATION = 1.5  # Minimum seconds a subtitle must stay visible
+
+
+def _parse_lyrics_sections(lyrics_text):
+    """Parse lyrics text into named sections with their lines preserved.
+
+    Handles markers like [Verse], [Chorus], [Bridge], [Intro], [Outro].
+    Lines before any marker or between unknown markers get section "default".
+    Consecutive markers with empty content skip the first (no empty sections).
+
+    Returns:
+        List of (section_name, [line_str, ...]) tuples in document order.
+    """
+    sections = []
+    current_section = "default"
+    current_lines = []
+
+    for line in lyrics_text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            # Flush current section if it accumulated lines
+            if current_lines:
+                sections.append((current_section, current_lines))
+                current_lines = []
+            section_name = stripped[1:-1].strip().lower()
+            # Strip trailing numbers e.g. "verse 1" -> "verse"
+            base_name = section_name.rstrip("0123456789 ").strip()
+            current_section = base_name if base_name else "default"
+        else:
+            current_lines.append(stripped)
+
+    if current_lines:
+        sections.append((current_section, current_lines))
+
+    return sections
+
+
+def _generate_section_weighted_srt(lyrics_text, duration_sec, mp3_path=None):
+    """Generate SRT subtitles with section-weighted timing + silence opt.
+
+    Uses [Verse], [Chorus], etc. markers to give each section its own
+    pacing, so verses naturally get more time per line than choruses.
+    When ``mp3_path`` is provided, ffprobe silence detection further
+    refines timing — subtitles pause during instrumental breaks.
 
     Args:
         lyrics_text: Full lyrics with section markers like [Verse]
         duration_sec: Total song duration in seconds
+        mp3_path: Optional path to MP3 for silence detection
 
     Returns:
-        SRT-formatted string, or empty string if no suitable lyrics
+        SRT-formatted string, or empty string if no usable lyrics.
     """
-    lines = []
-    for line in lyrics_text.split("\n"):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("["):
-            lines.append(stripped)
-    if not lines:
+    if not lyrics_text or not lyrics_text.strip():
         return ""
 
-    chunk_duration = duration_sec / len(lines)
-    srt_parts = []
+    sections = _parse_lyrics_sections(lyrics_text)
+    if not sections:
+        return ""
+
+    # ---- Part A: Section-weighted time allocation ----
+    # Build ordered list of (section, lines, pacing) that we can iterate
+    weighted_sections = []
+    total_weighted = 0.0
+    for sec_name, sec_lines in sections:
+        if not sec_lines:
+            continue
+        pacing = SECTION_PACING.get(sec_name, SECTION_PACING["default"])
+        w = len(sec_lines) * pacing
+        total_weighted += w
+        weighted_sections.append((sec_name, sec_lines, pacing, w))
+
+    if total_weighted <= 0 or not weighted_sections:
+        return ""
+
+    # Generate per-line SRT entries with section-proportional timing
+    srt_entries = []
     idx = 1
-    for i in range(0, len(lines), 2):
-        chunk = lines[i:i + 2]
-        chunk_text = "\n".join(chunk)
-        start = i * chunk_duration
-        end = (i + len(chunk)) * chunk_duration
-        # Ensure each subtitle is visible for at least 1.5s
-        if end - start < 1.5:
-            end = start + 1.5
-        srt_parts.append(str(idx))
-        srt_parts.append(f"{_format_srt_time(start)} --> {_format_srt_time(min(end, duration_sec))}")
-        srt_parts.append(chunk_text)
+    cursor = 0.0  # cumulative elapsed time in seconds
+
+    for sec_name, sec_lines, pacing, sec_weight in weighted_sections:
+        # How many seconds this entire section gets
+        sec_duration = (sec_weight / total_weighted) * duration_sec
+        # Clamp: each line gets at least MIN_SRT_DURATION
+        line_duration = max(MIN_SRT_DURATION, sec_duration / len(sec_lines))
+
+        for i, line in enumerate(sec_lines):
+            start = cursor + i * line_duration
+            end = min(start + line_duration, duration_sec)
+            if end - start < MIN_SRT_DURATION:
+                end = min(start + MIN_SRT_DURATION, duration_sec)
+            if start >= duration_sec:
+                break
+            srt_entries.append({
+                "index": idx,
+                "start": start,
+                "end": end,
+                "text": line,
+            })
+            idx += 1
+
+        cursor += len(sec_lines) * line_duration
+
+    # ---- Part B: Silence detection & adjustment ----
+    if mp3_path and os.path.isfile(mp3_path):
+        try:
+            silent_regions = _detect_silent_regions(mp3_path)
+            if silent_regions:
+                n_before = len(srt_entries)
+                srt_entries = _adjust_srt_for_silence(srt_entries, silent_regions, duration_sec)
+                print(f"[nightly:visualizer] Silence regions: {len(silent_regions)}, "
+                      f"SRT entries: {n_before} → {len(srt_entries)}")
+        except Exception as e:
+            print(f"[nightly:visualizer] Silence detection failed (non-fatal): {e}",
+                  file=sys.stderr)
+
+    # ---- Format SRT ----
+    srt_parts = []
+    for entry in srt_entries:
+        srt_parts.append(str(entry["index"]))
+        srt_parts.append(
+            f"{_format_srt_time(entry['start'])} --> {_format_srt_time(entry['end'])}"
+        )
+        srt_parts.append(entry["text"])
         srt_parts.append("")
-        idx += 1
 
     return "\n".join(srt_parts)
+
+
+def _detect_silent_regions(mp3_path, silence_duration=0.5, silence_threshold=-40):
+    """Detect silent regions in an audio file via ffprobe silencedetect.
+
+    Args:
+        mp3_path: Path to audio file.
+        silence_duration: Minimum silence duration to report (seconds).
+        silence_threshold: dB threshold for silence detection.
+
+    Returns:
+        List of (start_sec, end_sec) tuples, ordered by start time.
+        Empty list on error or no silence found.
+    """
+    if not os.path.isfile(mp3_path):
+        return []
+
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", "-f", "lavfi",
+            "-i",
+            f"amovie={mp3_path},"
+            f"silencedetect=n={silence_threshold}dB:d={silence_duration}",
+            "-show_entries", "tags=lavfi.silence_start,lavfi.silence_end",
+            "-of", "json",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            return []
+
+        data = json.loads(proc.stdout)
+        frames = data.get("frames", [])
+
+        # silencedetect outputs two tagged frames per silence period:
+        #   lavfi.silence_start  (when silence begins)
+        #   lavfi.silence_end    (when silence ends)
+        starts, ends = [], []
+        for frame in frames:
+            tags = frame.get("tags", {})
+            if "lavfi.silence_start" in tags:
+                try:
+                    starts.append(float(tags["lavfi.silence_start"]))
+                except (ValueError, TypeError):
+                    pass
+            if "lavfi.silence_end" in tags:
+                try:
+                    ends.append(float(tags["lavfi.silence_end"]))
+                except (ValueError, TypeError):
+                    pass
+
+        # Pair start/end in order
+        regions = []
+        for s, e in zip(starts, ends):
+            if e - s >= silence_duration:
+                regions.append((s, e))
+        return regions
+
+    except Exception:
+        return []
+
+
+def _adjust_srt_for_silence(entries, silent_regions, duration_sec):
+    """Split SRT entries at silence boundaries so no subtitle shows during silence.
+
+    Entries that span a silent gap are split into two (before and after),
+    preserving the original text. Entries entirely within silence are removed.
+
+    Args:
+        entries: List of dicts with keys index, start, end, text.
+        silent_regions: List of (start, end) silence tuples (seconds).
+        duration_sec: Total song duration (seconds).
+
+    Returns:
+        Adjusted list of entry dicts (re-indexed).
+    """
+    # Only operate on silences > 1 s — brief pauses are natural
+    significant = sorted(
+        [(s, e) for s, e in silent_regions if e - s > 1.0]
+    )
+    if not significant:
+        return entries
+
+    new_entries = []
+    idx = 1
+
+    for entry in entries:
+        # Build segments, cutting out silence gaps
+        segments = [(entry["start"], entry["end"])]
+
+        for s_start, s_end in significant:
+            next_segments = []
+            for seg_start, seg_end in segments:
+                if seg_end <= s_start or seg_start >= s_end:
+                    # No overlap — keep as-is
+                    next_segments.append((seg_start, seg_end))
+                elif seg_start >= s_start and seg_end <= s_end:
+                    # Entirely within silence — drop
+                    continue
+                elif seg_start < s_start and seg_end > s_end:
+                    # Spans the silence — split into before + after
+                    next_segments.append((seg_start, s_start))
+                    next_segments.append((s_end, seg_end))
+                elif seg_start < s_start and seg_end <= s_end:
+                    # Overlaps start of silence — clip end
+                    next_segments.append((seg_start, s_start))
+                elif seg_start >= s_start and seg_end > s_end:
+                    # Overlaps end of silence — clip start
+                    next_segments.append((s_end, seg_end))
+            segments = next_segments
+
+        for seg_start, seg_end in segments:
+            seg_end = min(seg_end, duration_sec)
+            if seg_end - seg_start >= MIN_SRT_DURATION:
+                new_entries.append({
+                    "index": idx,
+                    "start": seg_start,
+                    "end": seg_end,
+                    "text": entry["text"],
+                })
+                idx += 1
+
+    return new_entries
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +603,7 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None,
     if lyrics and lyrics_overlay:
         actual_duration = duration_sec or _probe_duration(mp3_path)
         if actual_duration > 0:
-            srt_content = _generate_full_song_srt(lyrics, actual_duration)
+            srt_content = _generate_section_weighted_srt(lyrics, actual_duration, mp3_path)
             if srt_content:
                 # Write SRT to temp file for FFmpeg subtitles filter
                 temp_srt_path = os.path.join(
