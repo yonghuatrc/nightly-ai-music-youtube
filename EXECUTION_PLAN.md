@@ -208,3 +208,13 @@ Preserved from the original `Project_Instruction.md` specification. These define
 | Output | `output/YYYY-MM-DD/` |
 | Song log | `output/YYYY-MM-DD/..` (JSON logs in output dir) |
 | Cron log | `logs/nightly_music.log` |
+
+---
+
+## Future Improvements
+
+### Whisper SRT Alignment
+- **Problem:** Lyrics drift due to uneven singing speed
+- **Solution:** OpenAI Whisper transcription with word-level timestamps
+- **Status:** ⬜ Planned
+- **Effort:** ~2-3 hours

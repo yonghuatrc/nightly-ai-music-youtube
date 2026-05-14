@@ -47,6 +47,7 @@ All Sprint 1-4 features were implemented and tested on 2026-05-14. The issues be
 | 4 | 🟡 **SRT timing alignment** — Full-song SRT distributes lines evenly | Implemented via FFmpeg `subtitles=` filter. Default line-based distribution. Section-aware timing deferred as enhancement | ✅ Shipped |
 | 5 | ✅ **Compilation concat compatibility** — FFmpeg concat may fail on different codec params | `nightly_compilation.py` includes re-encode fallback. Tested with existing output MP4s | ✅ Complete |
 | 6 | 🟡 **Quality scoring calibration** — Thresholds (6/10 Hero, 4/10 Standard) are initial guesses | `song_quality.py` ships with configurable thresholds in `nightly-music.yaml`. Tune after 7 days of scoring data | ✅ Shipped, 🟡 Tune after data |
+| 7 | 🟡 **SRT timing alignment** — Current section-weighted SRT has timing drift. Whisper forced alignment can produce frame-accurate subtitles. | Hermes | Install whisper, build integration, test on 3 songs | 🟡 Next sprint |
 
 ---
 
