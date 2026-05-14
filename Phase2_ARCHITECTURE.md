@@ -978,7 +978,7 @@ class PipelineState:
 | 3 | Write `pipeline_state.py` dataclass | `pipeline_state.py` (NEW) | 20min | Tests pass |
 | 4 | Update hero/standard duration max in visualizer call | `nightly_music.py` | 10min | Hero ≤210s, Standard ≤180s |
 | 5 | Shorts: reduce to 30s in config | `nightly-music.yaml` | 5min | Config updated |
-| 6 | Fix B1, B2, B3 (ordering, visualizer bg, thumbnail double-gen) | Various | 1hr | Per bug fix, each verified |
+| 6 | Fix B1-B4 (ordering, visualizer bg, thumbnail double-gen, Shorts frame/seconds) | Various | 1hr | Per bug fix, each verified |
 | 7 | Update song-log schema for new fields (tier, mood, quality score) | `nightly_music.py` | 15min | Log entries contain new fields |
 | 8 | Regression: existing tests still pass | Test suite | 30min | All 10 tests pass |
 | 9 | End screen template (YouTube Studio one-time) | Manual YouTube setup | 15min | End screen appears on videos |
@@ -1006,7 +1006,7 @@ class PipelineState:
 | Feature | Reason |
 |---------|--------|
 | `pipeline_state.py` dataclass | Useful regardless of scale. Clean state management. |
-| Fix B1, B2, B3 | Ordering bug, visualizer bg, thumbnail double-gen still exist. |
+| Fix B1-B4 | Ordering bug, visualizer bg, thumbnail double-gen, Shorts frame/seconds still exist. |
 | End screen template (YouTube Studio) | One-time setup, high ROI. |
 | Moviepy upgrade for Phase 2b | Only for animated visualizers — deferred. |
 

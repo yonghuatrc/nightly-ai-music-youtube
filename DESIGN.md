@@ -327,13 +327,14 @@ Sunday-only workflow:
 
 ### Sprint 4: Bug Fixes + E2E Regression
 
-Three ordering bugs found during integration testing:
+Four bugs found during integration testing:
 
 | Bug | Symptom | Root Cause | Fix |
 |-----|---------|------------|-----|
 | B1 | Background generated AFTER visualizer | `generate_background_image()` was called after `generate_visualizer()` in the pipeline sequence | Moved background generation before visualizer: assets must exist before FFmpeg can use them |
 | B2 | `background_image=None` passed to visualizer | Visualizer function signature accepted optional `background_image` arg, but pipeline called it without passing the downloaded path | Pipeline now passes `background_image` from `generate_background_image()` return value directly |
 | B3 | Thumbnail double-generated | Pipeline was calling both `generate_thumbnail_from_bg()` (Pillow) AND an old standalone thumbnail API call | Removed standalone thumbnail call. Thumbnail now uses Pillow-only resize from the background image |
+| B4 | Shorts duration 2.5s instead of 30s | `_find_loudest_window()` used `min(window_sec, len(rms_values))` treating 30 (seconds) as frame count. FFprobe astats produces ~38 frames/sec, so `min(30, 6126)` selected only 30 frames ≈ 0.78s instead of 30s | Convert `window_sec` to `window_frames` using actual `seconds_per_frame` ratio before `min()` + safety guard: if `actual_duration < 10s` fall back to song start |
 
 E2E regression: Full dry-run pipeline test after fixes confirmed all 7 steps complete without errors.
 
@@ -449,7 +450,7 @@ nightly-ai-music-youtube/
 | Shorts completion rate | ≥60% at 30s | 🔄 Monitoring — reduced from 45s for retention |
 | Weekly compilation (Sundays) | ≥4 videos per compilation | ✅ FFmpeg concat with chapter markers |
 | Mood detection accuracy | ≥70% matches listener expectation | 🔄 Needs user feedback data |
-| Pipeline reliability | ≤1 failure/week from code bugs | ✅ All known ordering bugs fixed (B1-B3) |
+| Pipeline reliability | ≤1 failure/week from code bugs | ✅ All known bugs fixed (B1-B4) |
 
 ---
 

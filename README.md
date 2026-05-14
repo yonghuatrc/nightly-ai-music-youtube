@@ -174,7 +174,7 @@ All Phase 2 features are shipped. The old "10 songs/day, multi-agent" plan was r
 | Shorts 30s | Clipped from chorus, 9:16 vertical | ✅ |
 | Weekly themes | Day-of-week mood modifiers in prompts | ✅ |
 | Weekly compilation | Sunday FFmpeg concat → album upload | ✅ |
-| E2E testing + tuning | Calibrated thresholds, fixed B1-B3 ordering bugs | ✅ |
+| E2E testing + tuning | Calibrated thresholds, fixed B1-B4 bugs (ordering + Shorts frame/seconds) | ✅ |
 
 ### What's Next
 

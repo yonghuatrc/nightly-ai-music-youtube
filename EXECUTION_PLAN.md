@@ -88,7 +88,7 @@ Phase 2 replaces the old "10 songs/day, multi-agent" plan with a quality-gated s
 | **Sprint 1** | `song_quality.py` — 5-dim scoring (lyrics_length, has_chorus, duration, placeholder_check, vocabulary_richness). Verdict: Hero ≥6 (premium), Standard ≥4, reject <4. Mood detection → 7 color palettes from lyrics. SRT overlay on long-form via FFmpeg `subtitles=` filter. Staggered upload schedule (Hero 18:00, Standard 20:00). Shorts duration 45s→30s. | ✅ Complete |
 | **Sprint 2** | `image_gen.py` — Pollinations.ai wrapper with rate limiting (15s delay). `prompt_gen.py` — MiniMax M2.7 LLM prompt generation + Pollinations fallback + rule-based last resort. Channel branding assets (logo 800x800, banner 2560x1440). Per-song backgrounds + thumbnails via Pollinations. | ✅ Complete |
 | **Sprint 3** | `weekly_themes.py` — 7 day-of-week themes (Mon=upbeat, Tue=melancholy, Wed=romantic, Thu=sad, Fri=energetic, Sat=chill, Sun=calm). Theme injected into MiniMax song prompt. Config toggle in `nightly-music.yaml`. | ✅ Complete |
-| **Sprint 4** | `nightly_compilation.py` — Sunday-only FFmpeg concat of Mon-Sat Hero videos. Chapter markers, ~30-45 min album. Bug fixes: B1 (visualizer runs after asset gen), B2 (background=None crash), B3 (thumbnail double-gen). E2E regression pass. | ✅ Complete |
+| **Sprint 4** | `nightly_compilation.py` — Sunday-only FFmpeg concat of Mon-Sat Hero videos. Chapter markers, ~30-45 min album. Bug fixes: B1 (visualizer runs after asset gen), B2 (background=None crash), B3 (thumbnail double-gen), B4 (Shorts frame/seconds confusion). E2E regression pass. | ✅ Complete |
 
 ### Fixed Bugs (Phase 2 QA)
 
@@ -97,6 +97,7 @@ Phase 2 replaces the old "10 songs/day, multi-agent" plan with a quality-gated s
 | B1 | Visualizer runs before assets exist | `nightly_music.py` | Reordered: assets→thumbnail→visualizer |
 | B2 | `generate_background()` returns None | `image_gen.py` | Added fallback to default background |
 | B3 | Thumbnail generated twice | `nightly_music.py` | Removed duplicate call in visualizer step |
+| B4 | Shorts duration < 3s (frame/seconds confusion) | `nightly_visualizer.py:_find_loudest_window()` | Convert `window_sec` to `window_frames` using actual `seconds_per_frame` ratio; added safety guard for <10s fallback |
 
 ---
 
