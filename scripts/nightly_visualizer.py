@@ -1121,7 +1121,9 @@ def _find_loudest_window(mp3_path, window_sec=45):
                 best_avg = avg
                 best_start = i
 
-        return float(best_start)
+        # Convert frame index to seconds
+        seconds_per_frame = duration / len(rms_values) if rms_values else 1.0
+        return float(best_start) * seconds_per_frame
 
     except Exception:
         return max(0.0, (duration - window_sec) / 2)
