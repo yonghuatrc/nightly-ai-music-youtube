@@ -641,24 +641,26 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None,
         bg_chain = "[0:v]setsar=1[bg]"
 
     waves_chain = (
-        "[1:a]showwaves=s=1920x400:mode=cline:rate=25:"
+        "[1:a]showwaves=s=1920x320:mode=p2p:rate=25:"
         f"colors={colors_used}[waves]"
     )
 
     # Overlay chain: background + waveform + title + optional subtitles
-    overlay_parts = [f"[bg][waves]overlay=0:(H-400)/2"]
+    overlay_parts = [f"[bg][waves]overlay=0:H-340"]
 
     if has_font:
         overlay_parts.append(
             f"drawtext=text='{escaped_title}':fontfile={font_path}:"
-            f"fontcolor=white:fontsize=48:x=(w-text_w)/2:y=H-100:"
-            f"expansion=none"
+            f"fontcolor=white:fontsize=56:x=(w-text_w)/2:y=80:"
+            f"expansion=none:"
+            f"shadowcolor=black@0.7:shadowx=3:shadowy=3"
         )
 
     if temp_srt_path and srt_content:
         overlay_parts.append(
             f"subtitles={temp_srt_path}:"
-            f"fontsdir={os.path.dirname(font_path) if font_path else '/'}"
+            f"fontsdir={os.path.dirname(font_path) if font_path else '/'}:"
+            f"force_style='Alignment=2,MarginV=340'"
         )
 
     overlay_chain = ",".join(overlay_parts) + "[out]"
@@ -988,7 +990,7 @@ def generate_short(mp3_path, title, lyrics, output_path, bg_path=None, max_durat
             bg_chain = "[0:v]setsar=1[bg]"
 
         waves_chain = (
-            "[1:a]showwaves=s=1080x300:mode=cline:rate=25:"
+            "[1:a]showwaves=s=1080x300:mode=p2p:rate=25:"
             "colors=#FF6B6B|#4ECDC4[waves]"
         )
 
