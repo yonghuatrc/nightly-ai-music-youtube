@@ -26,6 +26,7 @@ GENRES = [
     "华语流行抒情", "华语R&B", "华语民谣", "华语古风",
     "华语轻摇滚", "华语流行舞曲", "华语伤感情歌", "华语嘻哈",
     "华语电子流行", "华语流行说唱", "华语治愈系", "华语中国风",
+    "华语仙侠风",
 ]
 
 INSTRUMENTS = [
@@ -114,13 +115,16 @@ HEADERS = {
 # ---------------------------------------------------------------------------
 # HELPERS — build style prompt from song + artist
 # ---------------------------------------------------------------------------
-def build_style_prompt(song, artist):
+def build_style_prompt(song, artist, genre=None):
     """Generate a MiniMax-compatible style description from a song+artist pair."""
-    genre = random.choice(GENRES)
+    if genre:
+        from genre_keywords import build_genre_style_prompt
+        return build_genre_style_prompt(song, artist, genre)
+    g = random.choice(GENRES)
     inst = random.choice(INSTRUMENTS)
     vocal = random.choice(VOCALS)
     mood = random.choice(MOODS)
-    return f"类似{artist}的《{song}》风格，{genre}，{inst}，{vocal}，{mood}"
+    return f"类似{artist}的《{song}》风格，{g}，{inst}，{vocal}，{mood}"
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +133,7 @@ def build_style_prompt(song, artist):
 QQ_DOUYIN_URL = "https://y.qq.com/n/ryqq/toplist/60"
 
 
-def fetch_qq_douyin(count=15):
+def fetch_qq_douyin(count=15, genre=None):
     """Scrape QQ Music 抖音热歌榜 for song names and artists using embedded JSON data."""
     try:
         req = Request(QQ_DOUYIN_URL, headers=HEADERS)
@@ -197,7 +201,7 @@ def fetch_qq_douyin(count=15):
 
         # Build style prompts
         for r in unique:
-            r["style_prompt"] = build_style_prompt(r["song"], r["artist"])
+            r["style_prompt"] = build_style_prompt(r["song"], r["artist"], genre=genre)
 
         print(f"[fetch] qq-douyin: got {len(unique)} songs", file=sys.stderr)
         return unique[:count]
@@ -213,7 +217,7 @@ def fetch_qq_douyin(count=15):
 KKBOX_URL = "https://kma.kkbox.com/charts/daily/song?terr=tw&lang=tc&cate=297"
 
 
-def fetch_kkbox(count=15):
+def fetch_kkbox(count=15, genre=None):
     """
     Attempt to scrape KKBOX daily chart.
     Note: Page loads chart data via JS. We try to find any embedded data
@@ -294,7 +298,7 @@ def fetch_kkbox(count=15):
         if unique:
             for r in unique:
                 if not r.get("style_prompt"):
-                    r["style_prompt"] = build_style_prompt(r["song"], r.get("artist", "华语歌手"))
+                    r["style_prompt"] = build_style_prompt(r["song"], r.get("artist", "华语歌手"), genre=genre)
             return unique[:count]
 
         # If still empty, fall back
@@ -314,7 +318,7 @@ def fetch_kkbox(count=15):
 MYFM_URL = "https://my.com.my/home-my-fm"
 
 
-def fetch_myfm(count=15):
+def fetch_myfm(count=15, genre=None):
     """
     Attempt to find MY FM RIM 劲爆排行榜 chart from MY FM website.
     The chart is primarily shared as Instagram images, but there may be
@@ -356,7 +360,7 @@ def fetch_myfm(count=15):
 
         if unique:
             for r in unique:
-                r["style_prompt"] = build_style_prompt(r["song"], r["artist"])
+                r["style_prompt"] = build_style_prompt(r["song"], r["artist"], genre=genre)
             return unique[:count]
 
         print("[fetch] my-fm: no chart data found on website", file=sys.stderr)
@@ -373,7 +377,7 @@ def fetch_myfm(count=15):
 DDG_LITE_URL = "https://lite.duckduckgo.com/lite/"
 
 
-def fetch_generic(source_name, count=15):
+def fetch_generic(source_name, count=15, genre=None):
     """
     Generic fetcher for unknown sources.
     Uses DuckDuckGo search to find trending songs for the given source name.
@@ -425,7 +429,7 @@ def fetch_generic(source_name, count=15):
 
         if unique:
             for r in unique:
-                r["style_prompt"] = build_style_prompt(r["song"], r["artist"])
+                r["style_prompt"] = build_style_prompt(r["song"], r["artist"], genre=genre)
             print(f"[fetch] {source_name}: got {len(unique)} songs via search", file=sys.stderr)
             return unique[:count]
 
@@ -439,11 +443,15 @@ def fetch_generic(source_name, count=15):
 
 # ---------------------------------------------------------------------------
 # POOL FALLBACK
-def fetch_pool(count=15):
+def fetch_pool(count=15, genre=None):
     """Return songs from the hardcoded Chinese fallback pool."""
     pool = list(FALLBACK_POOL)
     random.shuffle(pool)
-    return pool[:count]
+    result = pool[:count]
+    if genre:
+        for r in result:
+            r["style_prompt"] = build_style_prompt(r["song"], r["artist"], genre=genre)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +477,12 @@ def main():
         default="chinese",
         help="Language filter (default: chinese)"
     )
+    parser.add_argument(
+        "--genre", "-g",
+        type=str,
+        default=None,
+        help="Genre for style prompt generation"
+    )
 
     args = parser.parse_args()
 
@@ -484,17 +498,17 @@ def main():
     if fetcher is None:
         print(f"[fetch] '{args.source}' is not a known source, using generic web search",
               file=sys.stderr)
-        fetcher = lambda c, s=args.source: fetch_generic(s, c)
+        fetcher = lambda c, g=None: fetch_generic(args.source, c, genre=g)
 
     # Try primary source
-    result = fetcher(args.count)
+    result = fetcher(args.count, args.genre)
 
     # Fall back to pool if primary source failed
     if result is None or len(result) == 0:
         source_label = args.source
         print(f"[fetch] {source_label} returned no results, falling back to pool",
               file=sys.stderr)
-        result = fetch_pool(args.count)
+        result = fetch_pool(args.count, genre=args.genre)
         # Mark them as pool-sourced so user knows
         for r in result:
             r["source"] = f"{args.source}-fallback"
@@ -502,7 +516,7 @@ def main():
     # Ensure we have enough
     if len(result) < args.count:
         # Pad with pool entries
-        pool = fetch_pool(args.count * 2)
+        pool = fetch_pool(args.count * 2, genre=args.genre)
         existing_keys = {(r["song"], r.get("artist", "")) for r in result}
         for r in pool:
             if (r["song"], r.get("artist", "")) not in existing_keys and len(result) < args.count:

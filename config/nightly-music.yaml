@@ -109,3 +109,6 @@ weekly_themes:
 compilation:
   enabled: true
   max_duration_min: 45
+
+genre_selection:
+  enabled: true

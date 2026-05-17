@@ -47,6 +47,7 @@ sys.path.insert(0, "/home/dennis/.hermes/venv/lib/python3.12/site-packages")
 from minimax_music_api import generate_and_save
 from song_quality import score_song_quality
 from weekly_themes import get_today_theme, apply_theme_to_prompt
+from genre_rotation import get_daily_genre, get_genre_metadata
 
 # Optional imports — weekly compilation album (Sundays only)
 try:
@@ -127,7 +128,7 @@ def load_config():
 # ---------------------------------------------------------------------------
 # Fetch trending songs
 # ---------------------------------------------------------------------------
-def fetch_trending(sources, count):
+def fetch_trending(sources, count, genre=None):
     """
     Fetch trending songs from one or more sources.
     sources can be a string (single source) or a list of strings.
@@ -146,6 +147,8 @@ def fetch_trending(sources, count):
             "--source", source,
             "--count", str(count * 2),  # Fetch extra for dedup
         ]
+        if genre:
+            cmd.extend(["--genre", genre])
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
@@ -713,12 +716,18 @@ def run_pipeline(date_str, dry_run=False):
     config_lang = config.get("language", "Chinese")
 
     # Validate sources against known list
-    KNOWN_SOURCES = {"qq-douyin", "kkbox", "my-fm", "pool"}
+    KNOWN_SOURCES = {"qq-douyin", "kkbox", "my-fm", "pool", "netease"}
     for src in sources:
         if src not in KNOWN_SOURCES:
             print(f"[nightly] WARNING: Unknown trending source '{src}' — will use generic search", file=sys.stderr)
 
     print(f"[nightly] Config: {song_count} songs, source={sources}, batch={songs_per_msg}/msg")
+
+    # Daily genre selection
+    genre = None
+    if config.get("genre_selection", {}).get("enabled", True):
+        genre = get_daily_genre(date_str)
+        print(f"[nightly] Genre: {genre}")
 
     # Weekly theme injection — Sprint 3: day-of-week mood modifiers
     weekly_themes_cfg = config.get("weekly_themes", {})
@@ -735,10 +744,10 @@ def run_pipeline(date_str, dry_run=False):
     print(f"[nightly] Daily folder: {songs_dir}")
 
     # Step 2: Fetch trending songs
-    trending = fetch_trending(sources, song_count)
+    trending = fetch_trending(sources, song_count, genre=genre)
     if not trending:
         print("[nightly] ERROR: No trending songs available, using pool", file=sys.stderr)
-        trending = fetch_trending(["pool"], song_count)
+        trending = fetch_trending(["pool"], song_count, genre=genre)
 
     if not trending:
         print("[nightly] FATAL: No songs to generate. Aborting.", file=sys.stderr)
@@ -775,8 +784,11 @@ def run_pipeline(date_str, dry_run=False):
     if len(trending) < song_count:
         needed = song_count - len(trending)
         print(f"[nightly] Dedup left {len(trending)} songs, supplementing {needed} from pool")
+        pool_cmd = [sys.executable, FETCH_SCRIPT, "--source", "pool", "--count", str(needed * 2)]
+        if genre:
+            pool_cmd.extend(["--genre", genre])
         pool_result = subprocess.run(
-            [sys.executable, FETCH_SCRIPT, "--source", "pool", "--count", str(needed * 2)],
+            pool_cmd,
             capture_output=True, text=True, timeout=15,
         )
         if pool_result.returncode == 0:
