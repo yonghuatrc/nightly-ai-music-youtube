@@ -191,7 +191,6 @@ All Phase 2 features are shipped. The old "10 songs/day, multi-agent" plan was r
 | [DESIGN.md](DESIGN.md) | Why we built it this way — office-hours design record |
 | [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | What's done, what's next — living tracker + Phase 1 & 2 specs |
 | [Phase2_Issues.md](Phase2_Issues.md) | Phase 2 issue backlog and Sprint tracker |
-| [docs/GROWTH_STRATEGY.md](docs/GROWTH_STRATEGY.md) | 500-subscriber growth plan |
 | [docs/CHANNEL_ABOUT.md](docs/CHANNEL_ABOUT.md) | YouTube channel setup guide |
 
 ---

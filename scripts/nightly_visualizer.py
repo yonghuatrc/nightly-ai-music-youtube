@@ -617,7 +617,7 @@ def generate_visualizer(mp3_path, output_path, title, background_image=None,
                 with open(srt_permanent, "w", encoding="utf-8") as f:
                     f.write(srt_content)
                 print(f"[nightly:visualizer] Full-song SRT: {len(srt_content)} chars, "
-                      f"{srt_content.count('\\n\\n') + 1} subtitles")
+                      f"{srt_content.count(chr(10) + chr(10)) + 1} subtitles")
         else:
             print(f"[nightly:visualizer] Cannot generate SRT — duration unknown",
                   file=sys.stderr)
@@ -942,6 +942,15 @@ def generate_short(mp3_path, title, lyrics, output_path, bg_path=None, max_durat
     chorus_start = _find_loudest_window(mp3_path, max_duration)
     actual_duration = min(max_duration, audio_duration - chorus_start)
 
+    # Safety: if the chorus window starts too close to the end of the song
+    # (producing a very short clip), fall back to the beginning of the song.
+    MIN_SHORT_DURATION = 10  # seconds
+    if actual_duration < MIN_SHORT_DURATION:
+        print(f"[nightly:visualizer] Chorus window too close to end ({actual_duration:.1f}s < {MIN_SHORT_DURATION}s) — "
+              f"falling back to song start")
+        chorus_start = 0.0
+        actual_duration = min(max_duration, audio_duration)
+
     # Temp files
     temp_dir = os.path.join(output_dir, f".shorts-tmp-{int(time.time())}")
     os.makedirs(temp_dir, exist_ok=True)
@@ -1102,8 +1111,13 @@ def _find_loudest_window(mp3_path, window_sec=45):
         if len(rms_values) < 2:
             return max(0.0, (duration - window_sec) / 2)
 
-        # Slide window to find loudest segment
-        window_samples = min(window_sec, len(rms_values))
+        # Compute seconds-per-frame ratio to convert window_sec to frame count
+        # RMS frames do NOT correspond 1:1 to seconds (actual ratio ~38 frames/sec),
+        # so we must convert window_sec from seconds to frames for the sliding window.
+        seconds_per_frame = duration / len(rms_values) if rms_values else 1.0
+        window_frames = max(1, int(window_sec / seconds_per_frame))
+        window_samples = min(window_frames, len(rms_values))
+
         if window_samples >= len(rms_values):
             return 0.0
 
@@ -1124,7 +1138,6 @@ def _find_loudest_window(mp3_path, window_sec=45):
                 best_start = i
 
         # Convert frame index to seconds
-        seconds_per_frame = duration / len(rms_values) if rms_values else 1.0
         return float(best_start) * seconds_per_frame
 
     except Exception:

@@ -90,7 +90,7 @@ All Phase 2 features shipped on **2026-05-14**.
 | Image generation | `scripts/image_gen.py` (Pollinations.ai) + `scripts/prompt_gen.py` (LLM prompts) |
 | Channel branding | `assets/branding/` — logo 800x800, banner 2560x1440 |
 | Bug fixes | B1 (ordering), B2 (None crash), B3 (double gen), B4 (Shorts frame/seconds) |
-| Growth docs | `docs/GROWTH_STRATEGY.md`, `docs/CHANNEL_ABOUT.md` |
+| Growth docs | `docs/CHANNEL_ABOUT.md` (growth strategy superseded) |
 
 ### What's Next
 

@@ -129,7 +129,7 @@
 
 ```yaml
 # Phase 2 — Revised Config
-song_count: 2  # Hard cap. No longer configurable >2.
+song_count: 2  # Current: 2 songs/night (was 10 in old plan)
 
 language: "chinese-only"
 

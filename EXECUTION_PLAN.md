@@ -204,7 +204,7 @@ Preserved from the original `Project_Instruction.md` specification. These define
 | **Prompt generation** | **`scripts/prompt_gen.py`** (Phase 2) |
 | **Image generation** | **`scripts/image_gen.py`** (Phase 2) |
 | Config | `config/nightly-music.yaml` |
-| Growth strategy | `docs/GROWTH_STRATEGY.md` |
+| Growth strategy | (superseded by Phase 2 quality-gated approach) |
 | Channel about | `docs/CHANNEL_ABOUT.md` |
 | Output | `output/YYYY-MM-DD/` |
 | Song log | `output/YYYY-MM-DD/..` (JSON logs in output dir) |

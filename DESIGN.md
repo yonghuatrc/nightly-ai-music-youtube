@@ -385,16 +385,12 @@ nightly-ai-music-youtube/
 │   └── song-log-YYYY-MM.json         # Monthly song log (rotation)
 │
 ├── docs/
-│   ├── GROWTH_STRATEGY.md            # 500-sub growth plan
-│   ├── CHANNEL_ABOUT.md              # YouTube About section content
-│   └── WORKFLOW-pipeline-phase2.md   # Phase 2 workflow specification
-│
+│   └── CHANNEL_ABOUT.md          # YouTube About section
 ├── DESIGN.md                         # This file. Design and decisions.
 ├── EXECUTION_PLAN.md                 # Phase 1 execution tracker
 ├── README.md                         # Project overview and usage
 ├── Phase2_Issues.md                  # Phase 2 issue backlog (historical)
 ├── Phase2_ARCHITECTURE.md            # Phase 2 architecture reference (historical)
-├── AGENT_EXECUTION_PLAN.md           # Agent-facing execution plan
 ├── Project_Instruction.md            # Original project specification
 ├── .env.example                      # Template (actual secrets in ~/.hermes/.env)
 └── .gitignore
